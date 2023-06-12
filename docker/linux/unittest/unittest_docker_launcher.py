@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2022 The Cobalt Authors. All Rights Reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,12 +26,11 @@ log = logging.getLogger(__name__)
 
 def exc(cmd, check=False):
   log.info(cmd)
-  try:
-    output = subprocess.check_output(cmd, shell=True)
-    log.info(output)
-  except subprocess.CalledProcessError:
-    if check:
-      raise
+  with subprocess.Popen(cmd, stdout=subprocess.PIPE) as p:
+    for line in p.stdout:
+      print(line)
+  if check and p.returncode:
+    raise subprocess.CalledProcessError(p.returncode, cmd)
 
 
 def main(argv):
@@ -40,26 +39,28 @@ def main(argv):
     shard_index = int(argv[1])
 
   out_dir = '/out'
+  coverage_dir = '/out/coverage'
 
-  exc(f'unzip -q {out_dir}/app_launcher -d /app_launcher_out')
+  exc(['unzip', '-q', f'{out_dir}/app_launcher.zip', '-d', '/app_launcher_out'])
 
-  xvfb_prefix = ('xvfb-run -a --server-args="-screen 0 1920x1080x24'
-                 '+render +extension GLX -noreset"')
+  xvfb_prefix = [
+      'xvfb-run', '-a',
+      '--server-args="-screen 0 1920x1080x24 +render +extension GLX -noreset"'
+  ]
   env_platform = os.getenv('PLATFORM')
   env_config = os.getenv('CONFIG')
   test_command = [
-      'python', '/app_launcher_out/starboard/tools/testing/test_runner.py',
-      '--run', '-o', out_dir, '-p', env_platform, '-c', env_config, '-l'
+      'python3', '/app_launcher_out/starboard/tools/testing/test_runner.py',
+      '--run', '-o', out_dir, '-p', env_platform, '-c', env_config, '-l',
+      '--coverage_dir', coverage_dir, '--coverage_report'
   ]
 
   if shard_index is not None:
     test_command.append('-s')
     test_command.append(str(shard_index))
 
-  test_command = ' '.join(test_command)
-
   start_t = time.time()
-  exc(f'{xvfb_prefix} {test_command}')
+  exc(xvfb_prefix + test_command)
   end_t = time.time()
 
   # Output shard timing information to file.

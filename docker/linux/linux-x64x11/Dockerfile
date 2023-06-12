@@ -15,6 +15,8 @@
 ARG FROM_IMAGE
 FROM ${FROM_IMAGE:-cobalt-build-base}
 
+RUN git config --global --add safe.directory /code
+
 RUN apt update -qqy \
     && apt install -qqy --no-install-recommends \
         clang \
@@ -30,5 +32,7 @@ RUN apt update -qqy \
 COPY ./linux-x64x11/requirements.txt /opt/requirements.txt
 RUN python3 -m pip install --require-hashes --no-deps -r /opt/requirements.txt
 
-CMD gn gen ${OUTDIR}/${PLATFORM}_${CONFIG} --args="target_platform=\"${PLATFORM}\" build_type=\"${CONFIG}\" sb_api_version=${SB_API_VERSION:-14}" && \
+ARG GN_ARGS="target_platform=\"${PLATFORM}\" build_type=\"${CONFIG}\" sb_api_version=${SB_API_VERSION:-14} use_clang_coverage=true"
+
+CMD gn gen ${OUTDIR}/${PLATFORM}_${CONFIG} --args=${GN_ARGS} && \
     ninja -v -j ${NINJA_PARALLEL} -C ${OUTDIR}/${PLATFORM}_${CONFIG} ${TARGET:-cobalt_install}
