@@ -19,11 +19,10 @@ import hashlib
 import logging
 import os
 import shutil
-import ssl
 import stat
 import tempfile
 import time
-import urllib.request
+import requests
 
 _BASE_GCS_URL = 'https://storage.googleapis.com'
 _BUFFER_SIZE = 2 * 1024 * 1024
@@ -38,23 +37,15 @@ def AddExecutableBits(filename):
   os.chmod(filename, st.st_mode | stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
 
 
-def ExtractSha1(filename):
-  with open(filename, 'rb') as f:
-    sha1 = hashlib.sha1()
-    buf = f.read(_BUFFER_SIZE)
-    while buf:
-      sha1.update(buf)
-      buf = f.read(_BUFFER_SIZE)
-  return sha1.hexdigest()
-
-
 def _DownloadFromGcsAndCheckSha1(bucket, sha1):
   url = f'{_BASE_GCS_URL}/{bucket}/{sha1}'
-  with urllib.request.urlopen(url, context=ssl.create_default_context()) as res:
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-      shutil.copyfileobj(res, tmp_file)
-
-  if ExtractSha1(tmp_file.name) != sha1:
+  with requests.get(url, timeout=5) as res:
+    tmp_file = tempfile.NamedTemporaryFile(delete=False)
+    for chunk in res.iter_content():
+      file_sha = hashlib.sha1()
+      file_sha.update(chunk)
+      
+  if file_sha.hexdigest() != sha1:
     raise GcsDownloadException(
         'Local and remote sha1s do not match. Skipping download.')
 
@@ -86,7 +77,7 @@ def MaybeDownloadFileFromGcs(bucket, sha1_file, output_file, force=False):
 
   try:
     tmp_file = _DownloadFromGcsAndCheckSha1(bucket, sha1)
-  except (urllib.error.URLError, GcsDownloadException) as e:
+  except (requests.RequestException, GcsDownloadException) as e:
     logging.error('Download failed: \'%s\', retrying', str(e))
     time.sleep(1)
     tmp_file = _DownloadFromGcsAndCheckSha1(bucket, sha1)
