@@ -446,13 +446,13 @@ template("executable") {
     }
 
     install_target(target_name + "_install") {
-      forward_variables_from(invoker, [ "testonly" ])
+      forward_variables_from(invoker, [ "testonly", "presubmission_targets_deps" ])
       installable_target_name = executable_target_name
       installable_target_dep = ":$executable_target_name"
       not_needed([ "installable_target_dep" ])
       type = "executable"
 
-      deps = []
+      deps = presubmission_targets_deps
       if (defined(invoker.deps)) {
         deps += invoker.deps
       }
@@ -490,6 +490,31 @@ template("shared_library") {
     forward_variables_from(invoker, "*", [ "install_target" ])
   }
 
+  presubmission_targets = []
+  if (new_varible) {
+    import("presubmission_files.gni")
+    generate_presubmission_files("${actual_target_name}_presubmission_files") {
+      ...
+      inputs = get_target_outputs(original_target_name)
+    }
+    presubmission_targets += [
+      "${actual_target_name}_presubmission_files",
+      "$the_target_that_generates_starboard_so_file",
+    ]
+  }
+
+
+  # in other file:
+  template("presubmission_files") {
+    forward_variables_from(invoker, "*", [ "inputs" ])
+
+    action("") {
+      exec_script
+      inputs
+      outputs
+    }
+  }
+
   if (build_loader) {
     group(target_name) {
       forward_variables_from(invoker, [ "testonly" ])
@@ -514,6 +539,8 @@ template("shared_library") {
         if (use_asan) {
           sources += [ "//$starboard_path/sanitizer_options.cc" ]
         }
+
+        presubmission_targets_deps = presubmission_targets
 
         out_dir = rebase_path(root_build_dir)
         defines = [
