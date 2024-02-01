@@ -24,6 +24,11 @@ import grpc
 import on_device_tests_gateway_pb2
 import on_device_tests_gateway_pb2_grpc
 
+# TODO(b/317441925): Set grpc timeout via args.
+# The longest test run has a 2h timeout and the default start timeout is 30m.
+# Let's not wait longer than that.
+_GRPC_TIMEOUT = 2.5 * 60 * 60
+
 # All tests On-Device tests support
 _TEST_TYPES = [
     'black_box_test',
@@ -67,29 +72,29 @@ class OnDeviceTestsGatewayClient():
         workdir (str): Current script workdir.
         args (Namespace): Arguments passed in command line.
     """
-    for response_line in self.stub.exec_command(
-        on_device_tests_gateway_pb2.OnDeviceTestsCommand(
-            workdir=workdir,
-            token=args.token,
-            test_type=args.test_type,
-            platform=args.platform,
-            archive_path=args.archive_path,
-            config=args.config,
-            tag=args.tag,
-            labels=args.label,
-            builder_name=args.builder_name,
-            change_id=args.change_id,
-            build_number=args.build_number,
-            loader_platform=args.loader_platform,
-            loader_config=args.loader_config,
-            version=args.version,
-            dry_run=args.dry_run,
-            dimension=args.dimension or [],
-            unittest_shard_index=args.unittest_shard_index,
-            test_attempts=args.test_attempts,
-            retry_level=args.retry_level,
-        )):
-
+    command = on_device_tests_gateway_pb2.OnDeviceTestsCommand(
+        workdir=workdir,
+        token=args.token,
+        test_type=args.test_type,
+        platform=args.platform,
+        archive_path=args.archive_path,
+        config=args.config,
+        tag=args.tag,
+        labels=args.label,
+        builder_name=args.builder_name,
+        change_id=args.change_id,
+        build_number=args.build_number,
+        loader_platform=args.loader_platform,
+        loader_config=args.loader_config,
+        version=args.version,
+        dry_run=args.dry_run,
+        dimension=args.dimension or [],
+        unittest_shard_index=args.unittest_shard_index,
+        test_attempts=args.test_attempts,
+        retry_level=args.retry_level,
+    )
+    # TODO(b/317441925): Deduce timeout from argument.
+    for response_line in self.stub.exec_command(command, timeout=_GRPC_TIMEOUT):
       print(response_line.response)
 
   def run_watch_command(self, workdir: str, args: argparse.Namespace):
