@@ -216,6 +216,7 @@ jobs:
   # Runs builds.
   build:
     needs: [initialize, docker-build-image]
+    timeout-minutes: 60
     permissions: {}
     runs-on: [self-hosted, linux-runner]
     name: ${{matrix.name}}_${{matrix.config}}

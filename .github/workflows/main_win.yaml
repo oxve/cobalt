@@ -46,6 +46,7 @@ jobs:
   # Generates build matrix based on json configuration file.
   initialize:
     runs-on: ubuntu-latest
+    timeout-minutes: 70
     permissions:
       pull-requests: write
     env:
