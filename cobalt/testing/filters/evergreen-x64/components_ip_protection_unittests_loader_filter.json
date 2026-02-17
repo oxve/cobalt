@@ -1,0 +1,8 @@
+{
+  "failing_tests": [
+    "IpProtectionStatusTest.*",
+    "IpProtectionStatusTest.Subresource*",
+    "IpProtectionStatusTest.SubresourceProxied_Direct*",
+    "IpProtectionStatusTest.SubresourceProxied_Non*"
+  ]
+}

@@ -672,11 +672,12 @@ if (!is_cronet_build) {
       sources += [ "machine_id_provider_nonwin_unittest.cc" ]
     }
 
+    if ((is_linux && !is_starboard) || is_chromeos) {
+      sources += [ "psi_memory_parser_linux_unittest.cc" ]
+    }
+
     if (is_linux || is_chromeos) {
-      sources += [
-        "psi_memory_parser_linux_unittest.cc",
-        "serialization/serialization_utils_unittest.cc",
-      ]
+      sources += [ "serialization/serialization_utils_unittest.cc" ]
       deps += [ ":serialization" ]
     }
 

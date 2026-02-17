@@ -185,6 +185,9 @@ MULTIPROCESS_TEST_MAIN(CrashingProcess) {
                                   /* database */ directory,
                                   /* metrics_dir */ metrics_dir,
                                   /* url */ "",
+#if BUILDFLAG(IS_STARBOARD)
+                                  /* ca_certificates_path */ base::FilePath(),
+#endif
                                   /* annotations */ annotations,
                                   /* arguments */ arguments);
 #elif BUILDFLAG(IS_ANDROID)
@@ -205,7 +208,11 @@ MULTIPROCESS_TEST_MAIN(CrashingProcess) {
   env->SetVar("LD_LIBRARY_PATH", library_path + ":" + modules.value());
 
   bool handler = client->StartHandlerAtCrash(
-      executable_path, directory, metrics_dir, "", annotations, arguments);
+      executable_path, directory, metrics_dir, "",
+#if BUILDFLAG(IS_STARBOARD)
+      base::FilePath(),
+#endif
+      annotations, arguments);
 #else
   bool handler = client->StartHandler(/* handler */ cmd_line->GetProgram(),
                                       /* database */ directory,

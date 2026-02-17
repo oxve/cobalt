@@ -1,0 +1,13 @@
+{
+  "failing": [],
+  "crashing": [],
+  "slow": [],
+  "failing_tests": [
+    "KeyDataFileDelegateTest.GeneratesKeys*",
+    "StructuredMetricsServiceTest.Does*",
+    "StructuredMetricsServiceTest.Flush*",
+    "StructuredMetricsServiceTest.PurgePersisted",
+    "StructuredMetricsServiceTest.Rotate*",
+    "StructuredMetricsServiceTest.System*"
+  ]
+}

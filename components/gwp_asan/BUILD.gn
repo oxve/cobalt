@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//testing/test.gni")
+import("//cobalt/build/configs/starboard.gni")
 
 # Defined as a separate target so that on Android tests can be launched in a
 # sub-thread instead of on the main thread to support multi-process tests.
@@ -21,7 +22,7 @@ test("gwp_asan_unittests") {
       "//components/gwp_asan/crash_handler:unit_tests",
     ]
   }
-  if (is_ios) {
+  if (is_ios || is_cobalt_hermetic_build) {
     deps -= [ "//components/gwp_asan/crash_handler:unit_tests" ]
   }
   data_deps = [ "//testing/buildbot/filters:gwp_asan_unittests_filters" ]

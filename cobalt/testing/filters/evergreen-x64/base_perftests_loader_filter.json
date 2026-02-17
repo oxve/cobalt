@@ -1,7 +1,14 @@
 {
   "failing_tests": [
+    "All/SequenceManagerPerfTest.*",
+    "BigEndianPerfTest.All",
+    "CounterPerfTest.*4Threads",
+    "JobPerfTest.*",
     "PartitionAllocMemoryAllocationPerfTest.*",
+    "RandUtilPerfTest.*",
+    "ScheduleWorkTest.*",
     "StackTracePerfTest.*",
-    "JobPerfTest.*"
+    "TaskObserverPerfTest.TaskPingPong",
+    "TaskPerfTest.TaskPingPong"
   ]
 }

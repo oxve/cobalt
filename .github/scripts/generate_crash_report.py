@@ -52,6 +52,7 @@ def _extract_crash_info(log_path: pathlib.Path) -> Tuple[str, str, str]:
   current_idx: int = -1
   current_test: str = ''
   for idx, line in enumerate(lines):
+    line = line.strip()
     current_idx = idx
     if RUN_MARKER in line:
       if current_test:
@@ -100,6 +101,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     suite, name, log = _extract_crash_info(args.log_path)
+    if suite != 'UnknownSuite' and name != 'UnknownTest':
+      print(f"CRASHED_TEST: {suite}.{name}")
     args.xml_path.parent.mkdir(parents=True, exist_ok=True)
     write_junit_xml(args.xml_path, suite, name, log)
 
