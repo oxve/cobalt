@@ -19,14 +19,12 @@ Requires PyGithub to run:
 """
 
 import argparse
-from typing import List
-
-from github import Github
+import github
 
 # Issue a Personal Access Token with 'repo' permission on
 # https://github.com/settings/tokens.
 YOUR_GITHUB_TOKEN = ''
-assert YOUR_GITHUB_TOKEN != '', 'YOUR_GITHUB_TOKEN must be set.'
+assert YOUR_GITHUB_TOKEN != '', 'YOUR_GITHUB_TOKEN must be set: `gh auth token`'
 
 TARGET_REPO = 'youtube/cobalt'
 
@@ -65,7 +63,7 @@ MINIMUM_LTS_RELEASE = 19
 LATEST_LTS_RELEASE = 25
 
 
-def get_protected_branches() -> List[str]:
+def get_protected_branches() -> list[str]:
   branches = ['main']
   for i in range(MINIMUM_LTS_RELEASE, LATEST_LTS_RELEASE + 1)[:-1]:
     branches.append(f'{i}.lts.1+')
@@ -73,7 +71,7 @@ def get_protected_branches() -> List[str]:
 
 
 def initialize_repo_connection():
-  g = Github(YOUR_GITHUB_TOKEN)
+  g = github.Github(auth=github.Auth.Token(YOUR_GITHUB_TOKEN))
   return g.get_repo(TARGET_REPO)
 
 
@@ -103,14 +101,14 @@ def should_include_run(check_run) -> bool:
   return True
 
 
-def get_required_checks_for_branch(repo, branch: str) -> List[str]:
+def get_required_checks_for_branch(repo, branch: str) -> list[str]:
   checks = get_checks_for_branch(repo, branch)
   filtered_check_runs = [run for run in checks if should_include_run(run)]
   check_names = set(run.name for run in filtered_check_runs)
   return list(check_names)
 
 
-def print_checks(repo, branch_name: str, new_checks: List[str],
+def print_checks(repo, branch_name: str, new_checks: list[str],
                  print_unchanged: bool) -> None:
   branch = repo.get_branch(branch_name)
   current_checks = branch.get_required_status_checks().contexts
@@ -137,7 +135,7 @@ def print_checks(repo, branch_name: str, new_checks: List[str],
 
 
 def update_protection_for_branch(repo, branch: str,
-                                 check_names: List[str]) -> None:
+                                 check_names: list[str]) -> None:
   branch = repo.get_branch(branch)
   branch.edit_required_status_checks(contexts=check_names)
 
