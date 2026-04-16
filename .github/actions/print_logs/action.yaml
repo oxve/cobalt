@@ -29,7 +29,7 @@ runs:
       env:
         WORKFLOW: ${{ github.workflow }}
       run: |
-        gsutil -m cp "gs://${{ steps.gcs-project.outputs.name }}-test-artifacts/${WORKFLOW}/${GITHUB_RUN_NUMBER}/${{matrix.platform}}/symbols/*" \
+        gcloud storage cp "gs://${{ steps.gcs-project.outputs.name }}-test-artifacts/${WORKFLOW}/${GITHUB_RUN_NUMBER}/${{matrix.platform}}/symbols/*" \
           "${GITHUB_WORKSPACE}/out/${{ matrix.platform }}_${{ matrix.config }}/lib.unstripped/
       shell: bash
     - name: Print Logs and Test Summary

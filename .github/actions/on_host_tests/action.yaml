@@ -13,13 +13,27 @@ inputs:
   num_gtest_shards:
     description: "Total number of shards used to run the steps in this file."
     required: true
+  run_id:
+    description: "The run ID to download artifacts from."
+    default: ""
+  github_token:
+    description: "GitHub token for downloading artifacts from another run."
+    default: ""
 runs:
   using: "composite"
   steps:
-    - name: Download Artifacts
+    - name: Download Artifacts (Current Run)
+      if: ${{ inputs.run_id == '' }}
       uses: actions/download-artifact@v5
       with:
         name: ${{ inputs.test_artifacts_key }}
+    - name: Download Artifacts (Previous Run)
+      if: ${{ inputs.run_id != '' }}
+      uses: actions/download-artifact@v5
+      with:
+        name: ${{ inputs.test_artifacts_key }}
+        run-id: ${{ inputs.run_id }}
+        github-token: ${{ inputs.github_token }}
     - name: Extract Artifacts
       shell: bash
       run: |

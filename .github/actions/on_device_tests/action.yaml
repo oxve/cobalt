@@ -116,7 +116,7 @@ runs:
         # Test results (xml and logs) must be in a subfolder in results_dir.
         # to be picked up by the test result processor.
         mkdir -p "${test_output}/${{ matrix.platform }}"
-        gsutil -q cp -r "${{ inputs.gcs_results_path }}/" "${test_output}/${{ matrix.platform }}"
+        gcloud storage cp -r "${{ inputs.gcs_results_path }}/" "${test_output}/${{ matrix.platform }}"
 
         # Check for missing result xml files.
         exit_code=0

@@ -1,0 +1,83 @@
+name: Workflow Dispatcher
+
+on:
+  pull_request:
+    types: [labeled, ready_for_review]
+
+permissions: read-all
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      pull-requests: write
+    steps:
+      - name: Check label and trigger
+        uses: actions/github-script@v8
+        env:
+          EXPENSIVE_WORKFLOWS: android.yaml,evergreen.yaml,raspi-2-modular.yaml
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const event = context.payload;
+            const pr = event.pull_request;
+
+            if (context.eventName !== 'pull_request') {
+              console.log('Not a pull request event.');
+              return;
+            }
+
+            let labelName = '';
+
+            if (event.action === 'labeled') {
+              const label = event.label.name;
+              if (label !== 'runtest' && label !== 'yts_playback_test') {
+                console.log(`No action taken for label: ${label}`);
+                return;
+              }
+              console.log(`Triggered by label: ${label}`);
+              labelName = label;
+            } else if (event.action === 'ready_for_review') {
+              console.log('Triggered by ready_for_review');
+            } else {
+              console.log(`No action taken for action: ${event.action}`);
+              return;
+            }
+
+            const expensive_workflows = process.env.EXPENSIVE_WORKFLOWS.split(',');
+            const ref = pr.head.ref;
+
+            for (const workflow of expensive_workflows) {
+              console.log(`Triggering ${workflow} for ref ${ref} with label_name: ${labelName}`);
+              try {
+                await github.rest.actions.createWorkflowDispatch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  workflow_id: workflow,
+                  ref: ref,
+                  inputs: {
+                    nightly: 'false',
+                    label_name: labelName
+                  }
+                });
+                console.log(`Successfully triggered ${workflow}`);
+              } catch (error) {
+                console.error(`Failed to trigger ${workflow}:`, error);
+              }
+            }
+
+            if (labelName === 'runtest') {
+              console.log(`Removing label ${labelName}`);
+              try {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  name: labelName
+                });
+                console.log(`Successfully removed label ${labelName}`);
+              } catch (error) {
+                console.error(`Failed to remove label ${labelName}:`, error);
+              }
+            }

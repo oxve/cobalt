@@ -18,6 +18,11 @@ on:
         required: false
         type: boolean
         default: false
+      label_name:
+        description: 'Label name'
+        required: false
+        type: string
+        default: ''
     secrets:
       datadog_api_key:
         required: false
@@ -55,9 +60,6 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_PR_REPO_URL: ${{ github.event.pull_request.base.repo.url }}
       GITHUB_EVENT_NUMBER: ${{ github.event.number }}
-    if: |
-      github.event.action != 'labeled' ||
-      (github.event.pull_request.merged == false && (github.event.label.name == 'runtest' || github.event.label.name == 'yts_playback_test'))
     timeout-minutes: 10
     steps:
       - name: Restore CI Essentials
@@ -291,6 +293,43 @@ jobs:
           set -x
           docker_content_sha=$(find cobalt/docker docker-compose.yaml -type f -exec sha256sum -b {} + | LC_ALL=C sort | sha256sum | head -c 64)
           echo "docker_content_sha=${docker_content_sha}" >> $GITHUB_OUTPUT
+      - name: Find previous successful run
+        id: find-run
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head_sha: context.sha,
+              status: 'success'
+            });
+
+            const successfulRuns = runs.data.workflow_runs;
+            console.log(`Found ${successfulRuns.length} successful runs for commit ${context.sha}`);
+
+            let previousRunId = '';
+            let previousRunNumber = '';
+            for (const run of successfulRuns) {
+              if (run.name !== context.workflow) continue;
+
+              const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+
+              if (artifacts.data.total_count > 0) {
+                previousRunId = run.id.toString();
+                previousRunNumber = run.run_number.toString();
+                console.log(`Found successful run with artifacts: ${run.id} (Run #${run.run_number})`);
+                break;
+              }
+            }
+
+            core.setOutput('previous_successful_run_id', previousRunId);
+            core.setOutput('previous_successful_run_number', previousRunNumber);
     outputs:
       platforms: ${{ steps.set-platforms.outputs.platforms }}
       build_runners: ${{ steps.set-build-runners.outputs.build_runners }}
@@ -322,6 +361,8 @@ jobs:
       num_gtest_shards: ${{ steps.set-gtest-shards.outputs.num_gtest_shards }}
       enable_sccache: ${{ steps.set-enable-sccache.outputs.enable_sccache }}
       docker_service: ${{ steps.set-docker-service.outputs.docker_service }}
+      previous_successful_run_id: ${{ steps.find-run.outputs.previous_successful_run_id }}
+      previous_successful_run_number: ${{ steps.find-run.outputs.previous_successful_run_number }}
 
   # Builds, tags, and pushes Cobalt docker build images to ghr.
   docker-build-image:
@@ -440,23 +481,23 @@ jobs:
       # Before that, keep a weak coupling for easier revert.
       - name: Prepare OverlayFS Workspace
         id: overlay_workspace
-        if: ${{ !contains(matrix.platform, 'tvos') }}
+        if: ${{ !contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' }}
         uses: ./.github/actions/overlay_workspace
         with:
           path: cobalt
           ref: ${{ github.sha }}
 
       - name: Runner Cache Hot
-        if: ${{ !contains(matrix.platform, 'tvos') && steps.overlay_workspace.outputs.cache_hit == 'true' }}
+        if: ${{ !contains(matrix.platform, 'tvos') && steps.overlay_workspace.outputs.cache_hit == 'true' && needs.initialize.outputs.previous_successful_run_id == '' }}
         shell: bash
         run: echo "Golden workspace found on SSD."
       - name: Runner Cache Cold
-        if: ${{ !contains(matrix.platform, 'tvos') && steps.overlay_workspace.outputs.cache_hit != 'true' }}
+        if: ${{ !contains(matrix.platform, 'tvos') && steps.overlay_workspace.outputs.cache_hit != 'true' && needs.initialize.outputs.previous_successful_run_id == '' }}
         shell: bash
         run: echo "Golden workspace missing or corrupted. Triggered full initialization sync."
 
       - name: Checkout
-        if: ${{ contains(matrix.platform, 'tvos') }}
+        if: ${{ contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' }}
         uses: ./.github/actions/checkout
         with:
           path: cobalt/src
@@ -468,15 +509,15 @@ jobs:
           use_cache: true
 
       - name: Set Up Depot Tools
-        if: ${{ contains(matrix.platform, 'tvos') }}
-        id: setup-depot-tools
+        if: ${{ contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' }}
+        id: setup-dep-tools
         uses: ./.github/actions/depot_tools
 
       - name: Build Cobalt
         id: build
         uses: ./.github/actions/build
         # TODO(bug?): android debug builds are broken.
-        if: ${{ ! (contains(matrix.platform, 'android') && matrix.config == 'debug') }}
+        if: ${{ ! (contains(matrix.platform, 'android') && matrix.config == 'debug') && needs.initialize.outputs.previous_successful_run_id == '' }}
         with:
           targets: ${{ needs.initialize.outputs.targets }}
           test_root_target: ${{ needs.initialize.outputs.test_root_target }}
@@ -485,12 +526,13 @@ jobs:
           sccache_gcs_key: ${{ secrets.sccache_gcs_key }}
 
       - name: Release Package
-        if:  (matrix.config == 'qa' || matrix.config == 'gold') && (needs.initialize.outputs.test_package == 'true' || needs.initialize.outputs.test_e2e == 'true' || needs.initialize.outputs.test_yts == 'true')
+        if: ${{ needs.initialize.outputs.previous_successful_run_id == '' && ((matrix.config == 'qa' || matrix.config == 'gold') && (needs.initialize.outputs.test_package == 'true' || needs.initialize.outputs.test_e2e == 'true' || needs.initialize.outputs.test_yts == 'true')) }}
         uses: ./.github/actions/package
         with:
           package_dir: out/test-package
 
       - name: Upload Test Artifacts
+        if: ${{ needs.initialize.outputs.previous_successful_run_id == '' }}
         uses: ./.github/actions/upload_test_artifacts
         with:
           test_artifacts_key: ${{ env.TEST_ARTIFACTS_KEY }}
@@ -504,7 +546,22 @@ jobs:
 
       - name: Run API Leak Detector
         uses: ./.github/actions/api_leak_detector
-        if: inputs.run_api_leak_detector
+        if: ${{ inputs.run_api_leak_detector && needs.initialize.outputs.previous_successful_run_id == '' }}
+
+      - name: Reuse GCS Artifacts
+        if: ${{ needs.initialize.outputs.previous_successful_run_id != '' && (matrix.config == 'devel' && needs.initialize.outputs.test_on_device == 'true' || matrix.config == 'qa' && (needs.initialize.outputs.test_e2e == 'true' || needs.initialize.outputs.test_yts == 'true')) }}
+        env:
+          PREVIOUS_RUN_NUMBER: ${{ needs.initialize.outputs.previous_successful_run_number }}
+          WORKFLOW: ${{ github.workflow }}
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          set -eux
+          project_name=$(gcloud config get-value project)
+          src_path="gs://${project_name}-test-artifacts/${WORKFLOW}/${PREVIOUS_RUN_NUMBER}/${PLATFORM}"
+          dst_path="gs://${project_name}-test-artifacts/${WORKFLOW}/${GITHUB_RUN_NUMBER}/${PLATFORM}"
+          echo "Copying artifacts from ${src_path} to ${dst_path}"
+          gcloud storage rsync -r "${src_path}" "${dst_path}"
+        shell: bash
 
 
   on-device-test:
@@ -625,7 +682,8 @@ jobs:
     if: |
       needs.initialize.outputs.test_yts_playback == 'true' &&
         (
-          github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'yts_playback_test')
+          (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'yts_playback_test')) ||
+          (github.event_name == 'workflow_dispatch' && inputs.label_name == 'yts_playback_test')
         )
     runs-on: [self-hosted, odt-runner]
     name: ${{ matrix.name }}_yts_playback_tests
@@ -754,6 +812,8 @@ jobs:
           test_artifacts_key: ${{ env.TEST_ARTIFACTS_KEY }}
           test_results_key: ${{ env.TEST_RESULTS_KEY }}
           num_gtest_shards: ${{ needs.initialize.outputs.num_gtest_shards }}
+          run_id: ${{ needs.initialize.outputs.previous_successful_run_id }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
     outputs:
       test_targets_json: ${{ steps.test-target-json.outputs.test_targets_json }}
 
