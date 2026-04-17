@@ -30,8 +30,8 @@ on:
         required: false
 
 concurrency:
-  # Cancel existing jobs on the same workflow, platform, and branch (or sha if merged).
-  group: ${{ github.workflow }}-${{ inputs.platform }} @ ${{ github.head_ref || github.sha }}-${{ github.ref }}
+  # Cancel existing jobs on the same workflow, platform, and branch.
+  group: ${{ github.workflow }}-${{ inputs.platform }} @ ${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 
 env:
@@ -571,7 +571,8 @@ jobs:
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false ) ||
           ((inputs.nightly == 'true' || github.event_name == 'schedule') && vars.RUN_ODT_TESTS_ON_NIGHTLY != 'False') ||
-          (github.event_name == 'push' && vars.RUN_ODT_TESTS_ON_POSTSUBMIT != 'False')
+          (github.event_name == 'push' && vars.RUN_ODT_TESTS_ON_POSTSUBMIT != 'False') ||
+          (github.event_name == 'workflow_dispatch' && inputs.label_name == 'runtest')
         )
     runs-on: [self-hosted, odt-runner]
     name: ${{ matrix.name }}_on_device_tests
@@ -617,7 +618,8 @@ jobs:
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false ) ||
           ((inputs.nightly == 'true' || github.event_name == 'schedule') && vars.RUN_ODT_TESTS_ON_NIGHTLY != 'False') ||
-          (github.event_name == 'push' && vars.RUN_ODT_TESTS_ON_POSTSUBMIT != 'False')
+          (github.event_name == 'push' && vars.RUN_ODT_TESTS_ON_POSTSUBMIT != 'False') ||
+          (github.event_name == 'workflow_dispatch' && inputs.label_name == 'runtest')
         )
     runs-on: [self-hosted, odt-runner]
     name: ${{ matrix.name }}_e2e_tests
@@ -652,7 +654,8 @@ jobs:
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false ) ||
           ((inputs.nightly == 'true' || github.event_name == 'schedule') && vars.RUN_ODT_TESTS_ON_NIGHTLY != 'False') ||
-          (github.event_name == 'push' && vars.RUN_ODT_TESTS_ON_POSTSUBMIT != 'False')
+          (github.event_name == 'push' && vars.RUN_ODT_TESTS_ON_POSTSUBMIT != 'False') ||
+          (github.event_name == 'workflow_dispatch' && inputs.label_name == 'runtest')
         )
     runs-on: [self-hosted, odt-runner]
     name: ${{ matrix.name }}_yts_tests
