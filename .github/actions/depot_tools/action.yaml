@@ -11,6 +11,9 @@ inputs:
   use_cache:
     description: Whether or not to use runner cache.
     default: 'true'
+  base_dir:
+    description: Path to install depot_tools.
+    default: depot_tools
 
 runs:
   using: "composite"
@@ -27,17 +30,28 @@ runs:
           echo "path=" >> ${GITHUB_OUTPUT}
         fi
 
+    - name: Check if cache is hot
+      id: check-hot
+      shell: bash
+      run: |
+        if [ -f "${GITHUB_WORKSPACE}/${{ inputs.base_dir }}/hot_cache" ]; then
+          echo "hot=true" >> $GITHUB_OUTPUT
+        else
+          echo "hot=false" >> $GITHUB_OUTPUT
+        fi
+
     - name: Clone Depot Tools
+      if: steps.check-hot.outputs.hot != 'true'
       uses: ./.github/actions/checkout
       with:
         repository: https://chromium.googlesource.com/chromium/tools/depot_tools.git
         ref: main
         fetch_depth: 0
-        path: depot_tools
+        path: ${{ inputs.base_dir }}
         use_cache: ${{ inputs.use_cache }}
 
     - name: Add Depot Tools to PATH
-      run: echo "${GITHUB_WORKSPACE}/depot_tools" >> ${GITHUB_PATH}
+      run: echo "${GITHUB_WORKSPACE}/${{ inputs.base_dir }}" >> ${GITHUB_PATH}
       shell: bash
 
     - name: Set CIPD Cache Directory
@@ -48,7 +62,7 @@ runs:
     - name: Bootstrap Bundled python3
       run: |
         # Must be run manually as $DEPOT_TOOLS_UPDATE is 0 in CI, skipping the bootstrap.
-        source ${GITHUB_WORKSPACE}/depot_tools/bootstrap_python3 && bootstrap_python3
+        source ${GITHUB_WORKSPACE}/${{ inputs.base_dir }}/bootstrap_python3 && bootstrap_python3
       shell: bash
 
     - name: Disable Chromium client side build telemetry

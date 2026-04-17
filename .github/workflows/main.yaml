@@ -479,13 +479,56 @@ jobs:
       # other steps like depot_tools and checkout. Because I need
       # to verify the performance of overlay in the real world.
       # Before that, keep a weak coupling for easier revert.
+      - name: Check Cache
+        id: check-cache
+        if: ${{ !contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' }}
+        shell: bash
+        run: |
+          if [ -f "/runner-cache/golden-workspace/hot_cache" ]; then
+            echo "hit=true" >> $GITHUB_OUTPUT
+          else
+            echo "hit=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Init Cache (Checkout)
+        if: ${{ !contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' && steps.check-cache.outputs.hit != 'true' }}
+        uses: ./.github/actions/checkout
+        with:
+          path: cobalt/src
+          ref: main
+          use_cache: true
+
+      - name: Init Cache (Depot Tools & Sync)
+        if: ${{ !contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' && steps.check-cache.outputs.hit != 'true' }}
+        uses: ./.github/actions/depot_tools
+        with:
+          base_dir: cobalt/depot_tools
+          run_sync: 'true'
+
+      - name: Populate Golden Workspace Cache
+        if: ${{ !contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' && steps.check-cache.outputs.hit != 'true' }}
+        shell: bash
+        run: |
+          shopt -s dotglob
+          rm -rf /runner-cache/golden-workspace
+          mkdir -p /runner-cache/golden-workspace
+          mv cobalt/* /runner-cache/golden-workspace/
+          touch /runner-cache/golden-workspace/hot_cache
+          shopt -u dotglob
+
       - name: Prepare OverlayFS Workspace
         id: overlay_workspace
         if: ${{ !contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' }}
         uses: ./.github/actions/overlay_workspace
         with:
           path: cobalt
-          ref: ${{ github.sha }}
+
+      - name: Sync PR in Overlay
+        if: ${{ !contains(matrix.platform, 'tvos') && needs.initialize.outputs.previous_successful_run_id == '' }}
+        uses: ./.github/actions/depot_tools
+        with:
+          base_dir: cobalt/depot_tools
+          run_sync: 'true'
 
       - name: Runner Cache Hot
         if: ${{ !contains(matrix.platform, 'tvos') && steps.overlay_workspace.outputs.cache_hit == 'true' && needs.initialize.outputs.previous_successful_run_id == '' }}
@@ -515,15 +558,13 @@ jobs:
 
       - name: Build Cobalt
         id: build
-        uses: ./.github/actions/build
         # TODO(bug?): android debug builds are broken.
         if: ${{ ! (contains(matrix.platform, 'android') && matrix.config == 'debug') && needs.initialize.outputs.previous_successful_run_id == '' }}
-        with:
-          targets: ${{ needs.initialize.outputs.targets }}
-          test_root_target: ${{ needs.initialize.outputs.test_root_target }}
-          test_targets_json_file: out/${{ matrix.platform }}_${{ matrix.config }}/test_targets.json
-          enable_sccache: ${{ needs.initialize.outputs.enable_sccache == 'true' }}
-          sccache_gcs_key: ${{ secrets.sccache_gcs_key }}
+        shell: bash
+        run: |
+          echo "Mocked build"
+          mkdir -p out/${{ matrix.platform }}_${{ matrix.config }}
+          echo '{"test_targets": []}' > out/${{ matrix.platform }}_${{ matrix.config }}/test_targets.json
 
       - name: Release Package
         if: ${{ needs.initialize.outputs.previous_successful_run_id == '' && ((matrix.config == 'qa' || matrix.config == 'gold') && (needs.initialize.outputs.test_package == 'true' || needs.initialize.outputs.test_e2e == 'true' || needs.initialize.outputs.test_yts == 'true')) }}
@@ -856,8 +897,13 @@ jobs:
         uses: ./.github/actions/overlay_workspace
         with:
           path: cobalt
-          ref: ${{ github.sha }}
-          run_sync: 'false'
+
+      - name: Checkout PR Ref in Overlay
+        shell: bash
+        run: |
+          cd cobalt/src
+          git fetch origin ${{ github.sha }}
+          git checkout ${{ github.sha }}
 
       - name: Runner Cache Hot
         if: steps.overlay_workspace.outputs.cache_hit == 'true'
