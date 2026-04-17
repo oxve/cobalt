@@ -30,7 +30,7 @@ runs:
         WORKFLOW: ${{ github.workflow }}
       run: |
         gcloud storage cp "gs://${{ steps.gcs-project.outputs.name }}-test-artifacts/${WORKFLOW}/${GITHUB_RUN_NUMBER}/${{matrix.platform}}/symbols/*" \
-          "${GITHUB_WORKSPACE}/out/${{ matrix.platform }}_${{ matrix.config }}/lib.unstripped/
+          "${GITHUB_WORKSPACE}/out/${{ matrix.platform }}_${{ matrix.config }}/lib.unstripped/"
       shell: bash
     - name: Print Logs and Test Summary
       run: |

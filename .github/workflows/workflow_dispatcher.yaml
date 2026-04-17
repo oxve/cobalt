@@ -16,7 +16,7 @@ jobs:
       - name: Check label and trigger
         uses: actions/github-script@v8
         env:
-          EXPENSIVE_WORKFLOWS: android.yaml,evergreen.yaml,raspi-2-modular.yaml
+          EXPENSIVE_WORKFLOWS: android.yaml,evergreen.yaml,raspi-2-modular.yaml,linux.yaml,tvos.yaml
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
