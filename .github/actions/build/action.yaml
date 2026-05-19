@@ -117,7 +117,7 @@ runs:
           echo "test_targets_count=${test_targets_count}" >> $GITHUB_OUTPUT
         shell: bash
       - name: Archive test target JSON
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.platform }}_test_targets_json
           path: cobalt/src/out/${{ matrix.platform }}_${{ matrix.config }}/test_targets.json
@@ -145,7 +145,7 @@ runs:
         shell: bash
       - name: Archive Android APKs
         if: startsWith(matrix.platform, 'android') && matrix.config == 'qa'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.platform }} APKs
           path: |

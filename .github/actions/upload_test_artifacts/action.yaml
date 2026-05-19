@@ -90,7 +90,7 @@ runs:
       shell: bash
     - name: Upload On-Host Test Artifacts Archive
       if: inputs.upload_on_host_test_artifacts == 'true'
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.test_artifacts_key }}
         path: artifacts/*

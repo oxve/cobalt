@@ -878,7 +878,7 @@ jobs:
         shell: bash
       - name: Download Test Results
         if: steps.filter.outputs.skipped != 'true'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.TEST_RESULTS_KEY }}*
           path: results/
@@ -939,7 +939,7 @@ jobs:
         run: echo "test_target=${test_target_with_path#*:}" >> $GITHUB_OUTPUT
         shell: bash
       - name: Download Test Results
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: ${{ env.TEST_RESULTS_KEY }}
@@ -989,13 +989,13 @@ jobs:
           sparse-checkout: ${{ env.CI_ESSENTIALS }}
       - name: Download Unit Test Results
         if: needs.test-results.result != 'skipped' && needs.test-results.result != ''
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           pattern: ${{ env.TEST_RESULTS_KEY }}*
           path: results/
       - name: Download Browser Test Results
         if: needs.initialize.outputs.run_browser_tests == 'true' && needs.browser-test-results.result != 'skipped' && needs.browser-test-results.result != ''
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           pattern: ${{ matrix.platform }}_${{ matrix.name }}_browsertest_results
