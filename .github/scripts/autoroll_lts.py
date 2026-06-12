@@ -178,7 +178,12 @@ def cherry_pick(sha, num, title):
   except subprocess.CalledProcessError as error:
     unmerged = get_unmerged_files()
     if not resolve_conflicts(unmerged):
-      subprocess.run(['git', 'reset', '--hard', 'HEAD'], check=True)
+      try:
+        git_dir = get_out(['git', 'rev-parse', '--git-dir']).strip()
+        with open(f'{git_dir}/AUTOROLL_FAILED_SHA', 'w', encoding='utf-8') as f:
+          f.write(sha)
+      except (subprocess.CalledProcessError, OSError) as e:
+        print(f'Warning: Failed to write failed SHA: {e}', file=sys.stderr)
       raise error
 
   # Check if there are changes to commit.
@@ -214,39 +219,44 @@ def main():
 
   # All commits in source branch and not in target branch (all commits
   # since the branch point).
-  for line in get_commits(args.source_branch, args.target_branch,
-                          args.start_commit):
-    if len(commits_added) >= args.max_commits:
-      print(f"Reached commit limit ({args.max_commits}).", file=sys.stderr)
-      break
+  try:
+    for line in get_commits(args.source_branch, args.target_branch,
+                            args.start_commit):
+      if len(commits_added) >= args.max_commits:
+        print(f"Reached commit limit ({args.max_commits}).", file=sys.stderr)
+        break
 
-    match = re.match(r'^(\w+) (.*?)(?: \(#(\d+)\))?$', line)
-    sha, title, pr_num = match.groups()
-    if match:
-      # Skip if in skip list.
-      if sha in _SKIP_LIST.get(args.target_branch, []):
-        continue
+      match = re.match(r'^(\w+) (.*?)(?: \(#(\d+)\))?$', line)
+      sha, title, pr_num = match.groups()
+      if match:
+        # Skip if in skip list.
+        if sha in _SKIP_LIST.get(args.target_branch, []):
+          continue
 
-      if args.identifier_type == 'pr':
-        change_id = pr_num
-        prefix = '#'
-      else:
-        change_id = sha
-        prefix = ''
+        if args.identifier_type == 'pr':
+          change_id = pr_num
+          prefix = '#'
+        else:
+          change_id = sha
+          prefix = ''
 
-      # Skip if in target branch.
-      if change_id in target_change_ids:
-        continue
+        # Skip if in target branch.
+        if change_id in target_change_ids:
+          continue
 
-      # Skip if in autoroll branch.
-      if change_id in autoroll_change_ids:
-        commits_added.append(f'- {prefix}{change_id}')
-        continue
+        # Skip if in autoroll branch.
+        if change_id in autoroll_change_ids:
+          commits_added.append(f'- {prefix}{change_id}')
+          continue
 
-      # Cherry pick PR.
-      if cherry_pick(sha, pr_num, title):
-        autoroll_change_ids.add(change_id)
-        commits_added.append(f'- {prefix}{change_id}')
+        # Cherry pick PR.
+        if cherry_pick(sha, pr_num, title):
+          autoroll_change_ids.add(change_id)
+          commits_added.append(f'- {prefix}{change_id}')
+  except Exception as e:
+    if commits_added:
+      print('\n'.join(commits_added))
+    raise e
 
   if commits_added:
     print('\n'.join(commits_added))
