@@ -31,6 +31,7 @@ _COBALT_SUBMODULE_DIRS = [
 @enum.unique
 class CommitStatus(enum.Enum):
   """Represents the outcome of a commit attempt."""
+
   SUCCESS = 'success'  # Successfully committed.
   CONFLICTED = 'conflicted'  # Committed with conflicts.
   SKIPPED = 'skipped'  # The commit was already present or no action was needed.
@@ -45,14 +46,15 @@ def run(cmd, cwd=None):
   subprocess.run(cmd, check=True, stdout=sys.stderr, cwd=cwd)
 
 
-def get_out(cmd):
-  res = subprocess.run(cmd, capture_output=True, text=True, check=True)
-  return res.stdout
+def git(*args, check=True, stdout=subprocess.PIPE, text=True, **kwargs):
+  cmd = ['git'] + list(args)
+  return subprocess.run(
+      cmd, check=check, stdout=stdout, text=text, **kwargs).stdout
 
 
 def get_start_sha(branch, autoroll_file):
   """Returns an autoroll start SHA or None if CONFLICTED."""
-  start = get_out(['git', 'show', f'{branch}:{autoroll_file}']).strip()
+  start = git('show', f'{branch}:{autoroll_file}').strip()
 
   if start.startswith('CONFLICTED:'):
     return None
@@ -65,11 +67,8 @@ def get_commits(branch, start):
   Starting from the non-inclusive start, the commits are represented as a
   (sha, title, pr_num) tuple.
   """
-  cmd = [
-      'git', 'rev-list', '--oneline', '--no-abbrev-commit', '--reverse',
-      f'{start}..{branch}'
-  ]
-  lines = get_out(cmd).splitlines()
+  lines = git('rev-list', '--oneline', '--no-abbrev-commit', '--reverse',
+              f'{start}..{branch}').splitlines()
 
   commits = []
   for line in lines:
@@ -89,7 +88,7 @@ def get_unmerged_files():
   - '2': 'ours'
   - '3': 'theirs'
   """
-  lines = get_out(['git', 'ls-files', '-u']).splitlines()
+  lines = git('ls-files', '-u').splitlines()
   files = defaultdict(set)
   stage_map = {'1': 'ancestor', '2': 'ours', '3': 'theirs'}
   for line in lines:
@@ -117,8 +116,8 @@ def resolve_conflicts(unmerged_files):
   # Special handling for .gitmodules to prevent "bad config" fatal errors
   if '.gitmodules' in unmerged_files:
     shutil.move('.gitmodules', '.gitmodules_conflict')
-    run(['git', 'checkout', '--ours', '--', '.gitmodules'])
-    run(['git', 'add', '--', '.gitmodules', '.gitmodules_conflict'])
+    git('checkout', '--ours', '--', '.gitmodules')
+    git('add', '--', '.gitmodules', '.gitmodules_conflict')
     unmerged_files.pop('.gitmodules', None)
 
   deleted_by_us = []
@@ -128,7 +127,7 @@ def resolve_conflicts(unmerged_files):
 
   for path, stages in unmerged_files.items():
     # Check if this path is a submodule (mode 160000)
-    file_info = get_out(['git', 'ls-files', '-u', '--', path])
+    file_info = git('ls-files', '-u', '--', path)
     is_submodule = '160000' in file_info
 
     if 'theirs' in stages and 'ours' not in stages:
@@ -142,26 +141,23 @@ def resolve_conflicts(unmerged_files):
 
   if deleted_by_us:
     log(f'Resolving \'deleted by us\' conflicts: {deleted_by_us}')
-    run(['git', 'rm', '--ignore-unmatch', '--'] + deleted_by_us)
+    git('rm', '--ignore-unmatch', '--', *deleted_by_us)
     for path in deleted_by_us:
       unmerged_files.pop(path, None)
 
   if deleted_by_them:
     log(f'Resolving \'deleted by them\' conflicts: {deleted_by_them}')
-    run(['git', 'rm', '--ignore-unmatch', '--'] + deleted_by_them)
+    git('rm', '--ignore-unmatch', '--', *deleted_by_them)
     for path in deleted_by_them:
       unmerged_files.pop(path, None)
 
   if submodule_conflicts:
     log(f'Resolving submodule conflicts: {submodule_conflicts}')
     for path in submodule_conflicts:
-      ls_files_out = get_out(['git', 'ls-files', '-u', '--', path])
+      ls_files_out = git('ls-files', '-u', '--', path)
       match = re.search(r'160000 ([a-f0-9]+) 3', ls_files_out)
       theirs_sha = match.group(1)
-      run([
-          'git', 'update-index', '--add', '--cacheinfo',
-          f'160000,{theirs_sha},{path}'
-      ])
+      git('update-index', '--add', '--cacheinfo', f'160000,{theirs_sha},{path}')
       unmerged_files.pop(path, None)
 
   if other_conflicts:
@@ -172,8 +168,7 @@ def resolve_conflicts(unmerged_files):
 
 
 def get_cherry_pick_metadata(sha, title, pr_num):
-  log_output = get_out(
-      ['git', 'log', '-1', '--format=%ad%x00%an <%ae>%x00%b', sha])
+  log_output = git('log', '-1', '--format=%ad%x00%an <%ae>%x00%b', sha)
   parts = log_output.split('\x00', 2)
   date = parts[0]
   author = parts[1]
@@ -195,8 +190,7 @@ def get_cherry_pick_metadata(sha, title, pr_num):
 
 
 def get_submodule_root_dirs():
-  paths = get_out(
-      ['git', 'config', '--file', '.gitmodules', '--get-regexp', 'path'])
+  paths = git('config', '--file', '.gitmodules', '--get-regexp', 'path')
 
   return sorted(
       {line.split(' ', 1)[1].split('/')[0] for line in paths.splitlines()})
@@ -205,24 +199,33 @@ def get_submodule_root_dirs():
 def remove_local_checkout():
   log('Removing local checkout...')
   roots = get_submodule_root_dirs()
-  if roots:
-    run(['rm', '-rf', '--'] + roots)
-  run(['git', 'rm', '-qrf', '--', '.'])
-  run(['git', 'clean', '-qffdx'])
+  for root in roots:
+    if os.path.islink(root):
+      os.remove(root)
+    elif os.path.isdir(root):
+      shutil.rmtree(root, ignore_errors=True)
+    elif os.path.exists(root):
+      os.remove(root)
+  git('rm', '-qrf', '--', '.')
+  git('clean', '-qffdx')
 
 
 def replace_submodules_with_dirs():
   log('Running gclient sync...')
-  repo_url = get_out(['git', 'remote', 'get-url', 'origin']).strip()
+  repo_url = git('remote', 'get-url', 'origin').strip()
   run(['gclient', 'config', '--name=src', '--unmanaged', repo_url], cwd='..')
   run(['gclient', 'sync', '--no-history'], cwd='..')
-  run(['rm', '-f', '--', os.path.join('..', '.gclient')])
+  gclient_file = os.path.join('..', '.gclient')
+  if os.path.exists(gclient_file):
+    os.remove(gclient_file)
   log('Removing Chromium submodules for Cobalt directories...')
   for submodule_dir in _COBALT_SUBMODULE_DIRS:
-    run(['rm', '-rf', '--', os.path.join(submodule_dir, '.git')])
-    run([
-        'git', 'rm', '-qrf', '--cached', '--ignore-unmatch', '--', submodule_dir
-    ])
+    submodule_git = os.path.join(submodule_dir, '.git')
+    if os.path.isdir(submodule_git):
+      shutil.rmtree(submodule_git, ignore_errors=True)
+    elif os.path.exists(submodule_git):
+      os.remove(submodule_git)
+    git('rm', '-qrf', '--cached', '--ignore-unmatch', '--', submodule_dir)
 
 
 def fetch_chromium_tree(chromium_sha):
@@ -252,7 +255,7 @@ def fetch_chromium_tree(chromium_sha):
 
 def get_upstream_chromium_sha(cobalt_sha):
   """Extracts the upstream Chromium commit SHA from the commit message body."""
-  body = get_out(['git', 'log', '-1', '--format=%B', cobalt_sha])
+  body = git('log', '-1', '--format=%B', cobalt_sha)
   match = re.search(r'Update to commit ([0-9a-fA-F]{40})', body)
   return match.group(1) if match else None
 
@@ -281,14 +284,14 @@ def verify_chromium_commit(sha):
         f'{upstream_sha}: {e}')
     return False
 
-  current_tree = get_out(['git', 'rev-parse', 'HEAD^{tree}']).strip()
+  current_tree = git('rev-parse', 'HEAD^{tree}').strip()
 
   if current_tree == expected_tree:
     log(f'Verification passed: Tree {current_tree} matches Chromium '
         f'{upstream_sha}.')
     return True
 
-  diff_output = get_out(['git', 'diff', '--name-status', sha, 'HEAD']).strip()
+  diff_output = git('diff', '--name-status', sha, 'HEAD').strip()
   log(f'ERROR: Rolled-in tree ({current_tree}) differs from Chromium '
       f'{upstream_sha} ({expected_tree})!')
   if diff_output:
@@ -319,28 +322,26 @@ def chromium_cherry_pick(previous_sha, sha, metadata, first_commit,
   """
   log(f'Checking out clean Chromium state: {previous_sha}')
   remove_local_checkout()
-  run(['git', 'checkout', previous_sha, '--', '.'])
+  git('checkout', previous_sha, '--', '.')
 
   replace_submodules_with_dirs()
 
   log('Committing Cobalt revert...')
-  run(['git', 'add', '--', '.'])
-  run([
-      'git', 'commit', '--no-verify', '-qm',
-      'CONFLICTED Chromium Cherry pick: Revert Cobalt.'
-  ])
-  revert_cobalt_sha = get_out(['git', 'rev-parse', 'HEAD']).strip()
+  git('add', '--', '.')
+  git('commit', '--no-verify', '-qm',
+      'CONFLICTED Chromium Cherry pick: Revert Cobalt.')
+  revert_cobalt_sha = git('rev-parse', 'HEAD').strip()
 
   log(f'Checking out clean Chromium state: {previous_sha}')
   remove_local_checkout()
-  run(['git', 'checkout', '-f', previous_sha, '--', '.'])
+  git('checkout', '-f', previous_sha, '--', '.')
 
   log('Committing submodules restore...')
-  run(['git', 'add', '--', '.'])
-  run(['git', 'commit', '--no-verify', '-qm', 'Restore submodules.'])
+  git('add', '--', '.')
+  git('commit', '--no-verify', '-qm', 'Restore submodules.')
 
   log('Cherry picking Chromium...')
-  run(['git', 'cherry-pick', sha])
+  git('cherry-pick', sha)
 
   if not verify_chromium_commit(sha):
     raise RuntimeError(
@@ -350,8 +351,8 @@ def chromium_cherry_pick(previous_sha, sha, metadata, first_commit,
   replace_submodules_with_dirs()
 
   log('Committing submodules replace...')
-  run(['git', 'add', '--', '.'])
-  run(['git', 'commit', '--no-verify', '-qm', 'Remove submodules.'])
+  git('add', '--', '.')
+  git('commit', '--no-verify', '-qm', 'Remove submodules.')
 
   log('Reverting Cobalt revert...')
   return apply_and_commit('revert', revert_cobalt_sha, metadata, first_commit,
@@ -380,7 +381,7 @@ def apply_and_commit(action, sha, metadata, first_commit, autoroll_metadata):
 
   # Apply
   try:
-    run(['git', action, '--no-commit', sha])
+    git(action, '--no-commit', sha)
   except subprocess.CalledProcessError:
     unmerged_files = get_unmerged_files()
     if resolve_conflicts(unmerged_files):
@@ -389,15 +390,15 @@ def apply_and_commit(action, sha, metadata, first_commit, autoroll_metadata):
       unmerged_files = list(unmerged_files)
 
       if not first_commit:
-        run(['git', 'reset', '--hard', 'HEAD'])
+        git('reset', '--hard', 'HEAD')
         return CommitStatus.FAILED, unmerged_files
 
-      run(['git', 'add', '--'] + unmerged_files)
+      git('add', '--', *unmerged_files)
       msg = f'CONFLICTED {msg}'
       result = CommitStatus.CONFLICTED
 
   # Check if there are changes to commit
-  if not get_out(['git', 'diff', '--cached', '--name-only']).strip():
+  if not git('diff', '--cached', '--name-only').strip():
     log('Commit skipped.')
     return CommitStatus.SKIPPED, unmerged_files
 
@@ -408,13 +409,11 @@ def apply_and_commit(action, sha, metadata, first_commit, autoroll_metadata):
       f.write(f'CONFLICTED:{autoroll_sha}\n')
     else:
       f.write(f'{autoroll_sha}\n')
-  run(['git', 'add', '--', autoroll_file])
+  git('add', '--', autoroll_file)
 
   # Commit
-  run([
-      'git', 'commit', '--no-verify', f'--date={date}', f'--author={author}',
-      '-m', msg
-  ])
+  git('commit', '--no-verify', f'--date={date}', f'--author={author}', '-m',
+      msg)
   return result, unmerged_files
 
 
@@ -435,9 +434,8 @@ def main():
     return
 
   if args.existing_pr_sha:
-    run(['git', 'fetch', 'origin', args.existing_pr_sha])
-    commit_title = get_out(
-        ['git', 'log', '-1', args.existing_pr_sha, '--format=%s']).strip()
+    git('fetch', 'origin', args.existing_pr_sha)
+    commit_title = git('log', '-1', args.existing_pr_sha, '--format=%s').strip()
     if commit_title.startswith('CONFLICTED'):
       log('Autoroll branch has a resolved CONFLICTED commit. '
           'Squash and merge before autoroll will continue.')
@@ -447,6 +445,7 @@ def main():
   commits_to_target = get_commits(args.source_branch, target_start)
   # Commits in source but not in autoroll
   commits_to_autoroll = get_commits(args.source_branch, autoroll_start)
+
   # SHAs in source but not in autoroll
   shas_to_autoroll = {sha for sha, _, _ in commits_to_autoroll}
 
