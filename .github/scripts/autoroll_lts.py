@@ -369,7 +369,7 @@ def main():
       previous_sha = sha
   except Exception as e:
     if commits_added:
-      print('\n'.join(commits_added))
+      print('\n'.join(commits_added), file=sys.stderr)
     raise e
 
   if commits_added:

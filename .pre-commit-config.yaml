@@ -17,10 +17,7 @@ files: |
     )$
 exclude: |
     (?x)^(
-        (
-            starboard/contrib/RDK|
-            starboard/contrib/rdk|
-        )/
+        starboard/contrib/rdk/
     )
 
 repos:
