@@ -6,6 +6,7 @@ import enum
 import json
 import os
 import re
+import shlex
 import shutil
 import ssl
 import subprocess
@@ -38,6 +39,9 @@ class CommitStatus(enum.Enum):
   FAILED = 'failed'  # The commit failed due to conflicts or other errors.
 
 
+VERBOSE = False
+
+
 def log(msg):
   print(msg, file=sys.stderr)
 
@@ -48,6 +52,8 @@ def run(cmd, cwd=None):
 
 def git(*args, check=True, stdout=subprocess.PIPE, text=True, **kwargs):
   cmd = ['git'] + list(args)
+  if VERBOSE:
+    log(f"Running: {shlex.join(cmd)}")
   return subprocess.run(
       cmd, check=check, stdout=stdout, text=text, **kwargs).stdout
 
@@ -418,13 +424,20 @@ def apply_and_commit(action, sha, metadata, first_commit, autoroll_metadata):
 
 
 def main():
+  global VERBOSE
   p = argparse.ArgumentParser()
   p.add_argument('--source-branch', required=True)
   p.add_argument('--target-branch', required=True)
   p.add_argument('--autoroll-file', required=True)
   p.add_argument('--max-commits', type=int, required=True)
   p.add_argument('--existing-pr-sha', required=True)
+  p.add_argument(
+      '--verbose',
+      action='store_true',
+      help='Print the full command that is run')
   args = p.parse_args()
+
+  VERBOSE = args.verbose
 
   target_start = get_start_sha(args.target_branch, args.autoroll_file)
   autoroll_start = get_start_sha('HEAD', args.autoroll_file)
