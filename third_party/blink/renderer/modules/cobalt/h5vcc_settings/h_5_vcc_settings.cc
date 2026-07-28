@@ -200,6 +200,13 @@ ScriptPromise<IDLUndefined> H5vccSettings::set(
           return true;
         });
   }
+  if (name == "DecoderBuffer.ReleaseMemoryOnBackground") {
+    return ProcessSettingAsEnableOnly(
+        script_state, exception_context, name, *value, [] {
+          ::media::DecoderBufferAllocator::EnableReleaseIdleMemory();
+          return true;
+        });
+  }
   // "DecoderBuffer." settings must be handled before this catch-all block.
   if (name.StartsWith("DecoderBuffer.")) {
     return Reject(script_state, exception_context,
@@ -213,6 +220,13 @@ ScriptPromise<IDLUndefined> H5vccSettings::set(
                                         enable;
                                     return base::ok();
                                   });
+  }
+  if (name == "Media.720pVideoBufferSizeClampMb") {
+    return ProcessSettingAsPositiveInt(
+        script_state, exception_context, name, *value, [](int int_value) {
+          ::media::Set720pVideoBufferSizeClamp(int_value);
+          return true;
+        });
   }
   if (name == "Media.ExperimentalMaxPendingBytesPerParse") {
     return ProcessSettingAsPositiveInt(

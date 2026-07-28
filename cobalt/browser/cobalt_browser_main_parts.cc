@@ -24,10 +24,13 @@
 #include "base/sequence_checker.h"
 #include "base/task/bind_post_task.h"
 #include "base/trace_event/memory_dump_manager.h"
+#include "build/build_config.h"
+#include "build/buildflag.h"
 #include "cobalt/browser/global_features.h"
 #include "cobalt/browser/metrics/cobalt_detailed_metrics_delegate.h"
 #include "cobalt/browser/metrics/cobalt_metrics_service_client.h"
 #include "cobalt/browser/switches.h"
+#include "cobalt/memory/cobalt_memory_attribution_manager.h"
 #include "cobalt/shell/browser/migrate_storage_record/migration_manager.h"
 #include "cobalt/shell/browser/shell_content_browser_client.h"
 #include "cobalt/shell/common/shell_paths.h"
@@ -35,9 +38,24 @@
 #include "components/metrics_services_manager/metrics_services_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_coordinator_service.h"
+
+#if BUILDFLAG(USE_EVERGREEN)
+#include "starboard/extension/native_stability.h"
+#include "starboard/system.h"
+#endif
+
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/client_process_impl.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation_features.h"
+#if !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+#include "base/location.h"
+#include "base/task/single_thread_task_runner.h"
+#include "components/services/heap_profiling/heap_profiling_service.h"  // nogncheck
+#include "components/services/heap_profiling/public/cpp/profiling_client.h"  // nogncheck
+#include "components/services/heap_profiling/public/mojom/heap_profiling_service.mojom.h"  // nogncheck
+#include "mojo/public/cpp/bindings/remote.h"
+#include "services/tracing/public/cpp/trace_startup.h"
+#endif
 
 #if BUILDFLAG(IS_ANDROIDTV)
 #include "base/android/memory_pressure_listener_android.h"
@@ -89,6 +107,71 @@ void InitializeBrowserMemoryInstrumentationClient() {
       /*is_browser_process=*/true);
 }
 
+#if !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+void RegisterCobaltHeapProfilerOnDumpThread() {
+  [[maybe_unused]] static base::SequenceChecker sequence_checker;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker);
+
+  static bool initialized = false;
+  if (initialized) {
+    return;
+  }
+  initialized = true;
+
+  LOG(INFO) << "RegisterCobaltHeapProfilerOnDumpThread: Initializing heap "
+               "profiling service on Dump Thread...";
+
+  // 1. Register the heap profiler with the memory instrumentation registry
+  // (safely on Dump Thread).
+  mojo::PendingRemote<memory_instrumentation::mojom::HeapProfilerHelper> helper;
+  mojo::PendingRemote<memory_instrumentation::mojom::HeapProfiler> profiler;
+  auto profiler_receiver = profiler.InitWithNewPipeAndPassReceiver();
+  content::GetMemoryInstrumentationRegistry()->RegisterHeapProfiler(
+      std::move(profiler), helper.InitWithNewPipeAndPassReceiver());
+
+  // 2. Launch the heap profiling service, passing the receiver and helper.
+  static base::NoDestructor<
+      mojo::Remote<heap_profiling::mojom::ProfilingService>>
+      g_profiling_service;
+  g_profiling_service->Bind(heap_profiling::LaunchService(
+      std::move(profiler_receiver), std::move(helper)));
+
+  // 3. Create and bind our local ProfilingClient.
+  static base::NoDestructor<heap_profiling::ProfilingClient> g_profiling_client;
+  mojo::PendingRemote<heap_profiling::mojom::ProfilingClient> client_remote;
+  g_profiling_client->BindToInterface(
+      client_remote.InitWithNewPipeAndPassReceiver());
+
+  // 4. Add our process as a profiling client to the profiling service.
+  auto params = heap_profiling::mojom::ProfilingParams::New();
+  params->sampling_rate = 128 * 1024;  // 128KB sampling rate
+  params->stack_mode =
+      heap_profiling::mojom::StackMode::NATIVE_WITH_THREAD_NAMES;
+
+  (*g_profiling_service)
+      ->AddProfilingClient(
+          base::GetCurrentProcId(), std::move(client_remote),
+          heap_profiling::mojom::ProcessType::BROWSER, std::move(params),
+          base::BindOnce([](bool success) {
+            LOG(INFO) << "Cobalt Heap Profiler Client added successfully: "
+                      << success;
+          }));
+}
+
+void InitializeCobaltHeapProfiler() {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          "enable-heap-profiling")) {
+    return;
+  }
+  LOG(INFO) << "InitializeCobaltHeapProfiler: Posting initialization task to "
+               "Dump Thread...";
+  auto task_runner = base::trace_event::MemoryDumpManager::GetInstance()
+                         ->GetDumpThreadTaskRunner();
+  task_runner->PostTask(
+      FROM_HERE, base::BindOnce(&RegisterCobaltHeapProfilerOnDumpThread));
+}
+#endif  // !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+
 }  // namespace
 
 void CobaltBrowserMainParts::InitializeMessageLoopContext() {
@@ -106,12 +189,25 @@ CobaltBrowserMainParts::CobaltBrowserMainParts(const std::string& deep_link,
     : ShellBrowserMainParts(deep_link, is_visible) {}
 
 int CobaltBrowserMainParts::PreCreateThreads() {
+#if !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+  LOG(INFO) << "Native CommandLine: "
+            << base::CommandLine::ForCurrentProcess()->GetCommandLineString();
+#endif
 #if BUILDFLAG(IS_ANDROIDTV)
   starboard::StarboardBridge::GetInstance()->SetStartupMilestone(17);
 #endif
   SetupMetrics();
 
   InitializeBrowserMemoryInstrumentationClient();
+
+#if !BUILDFLAG(COBALT_IS_RELEASE_BUILD)
+  // Manually initialize Perfetto tracing post-FeatureList for Cobalt.
+  // This is required because Cobalt bypasses
+  // ContentMainRunnerImpl::RunBrowser() which normally initializes tracing in
+  // standard Chromium.
+  tracing::InitTracingPostFeatureList(/*enable_consumer=*/true);
+  InitializeCobaltHeapProfiler();
+#endif
 
 #if BUILDFLAG(IS_ANDROIDTV)
   base::android::MemoryPressureListenerAndroid::Initialize(
@@ -131,6 +227,8 @@ int CobaltBrowserMainParts::PreMainMessageLoopRun() {
   }
 #endif
 
+  cobalt::memory::CobaltMemoryAttributionManager::Get()->Start();
+
 #if !BUILDFLAG(IS_ANDROIDTV)
   auto* client = CobaltContentBrowserClient::Get();
   CHECK(client) << "CobaltContentBrowserClient::Get() returned NULL in "
@@ -138,6 +236,31 @@ int CobaltBrowserMainParts::PreMainMessageLoopRun() {
   client->SetUserAgentCrashAnnotation();
 
 #endif  // !BUILDFLAG(IS_ANDROIDTV)
+
+#if BUILDFLAG(USE_EVERGREEN)
+  // TODO: b/528362453 - This startup extension query is for debugging and to
+  // serve as an example of how to invoke the NativeStability extension.
+  // Remove this block once the NativeStabilityManager singleton is added to
+  // the browser to query the extension to respond to web app requests.
+  auto native_stability_extension =
+      static_cast<const StarboardExtensionNativeStabilityApi*>(
+          SbSystemGetExtension(kStarboardExtensionNativeStabilityName));
+  if (native_stability_extension && native_stability_extension->version >= 1 &&
+      native_stability_extension->ReadReports) {
+    constexpr int max_num_reports = 16;  // A somewhat arbitrary, large number
+    SbNativeStabilityReport reports[max_num_reports];
+    int count =
+        native_stability_extension->ReadReports(reports, max_num_reports);
+    LOG(INFO) << "=== NativeStability extension query at startup returned "
+              << count << " reports ===";
+    for (int i = 0; i < count; ++i) {
+      LOG(INFO) << "Report [" << i
+                << "]: event_uuid=" << reports[i].native_stability_event_uuid
+                << ", event_time_s=" << reports[i].event_time_s
+                << ", type=" << static_cast<int>(reports[i].report_type);
+    }
+  }
+#endif
 
   int result = ShellBrowserMainParts::PreMainMessageLoopRun();
 

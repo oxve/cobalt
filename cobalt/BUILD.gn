@@ -67,6 +67,7 @@ group("gn_all") {
       ":cobalt_loader",
       "//starboard/elf_loader:elf_loader_sandbox($starboard_toolchain)",
       "//starboard/loader_app:loader_app($starboard_toolchain)",
+      "//starboard/tools/zstd_compress:zstd_compress_unittest($host_toolchain)",
     ]
   }
   if (is_starboard && build_updater_sandbox) {
@@ -134,6 +135,8 @@ if (is_ios && target_platform == "tvos") {
 
     configs -= [ "//build/config/compiler:thin_archive" ]
 
+    sources = [ "app/tvos/main.mm" ]
+
     deps = [
       ":common",
       "//base",
@@ -143,6 +146,18 @@ if (is_ios && target_platform == "tvos") {
       "//content/public/app",
       "//starboard:starboard_group",
     ]
+  }
+
+  action("merge_rlibs_tvos_archive") {
+    script = "//cobalt/build/tvos/merge_rlibs_tvos_archive.sh"
+
+    deps = [ ":cobalt_archive" ]
+
+    inputs = [ "$target_out_dir/libcobalt_archive.a" ]
+
+    outputs = [ "$root_out_dir/cobalt.a" ]
+
+    args = [ rebase_path(root_out_dir, root_build_dir) ]
   }
 
   foreach(locale, cobalt_locales) {
@@ -166,15 +181,13 @@ if (is_ios && target_platform == "tvos") {
 
     outputs = [ "{{bundle_resources_dir}}/{{source_file_part}}" ]
   }
-} else if (!is_android) {
+} else if (!is_androidtv) {
   if (is_cobalt_hermetic_build) {
     cobalt_target_type = "modular_executable"
   } else {
     cobalt_target_type = "executable"
   }
   target(cobalt_target_type, "cobalt") {
-    testonly = true
-
     sources = [ "app/cobalt.cc" ]
 
     configs += [ "//build/config/gcc:rpath_for_built_shared_libraries" ]
@@ -193,6 +206,7 @@ if (is_ios && target_platform == "tvos") {
       deps += [ "//ui/ozone/platform/starboard:starboard" ]
     } else {
       # Web test support only built for the linux-x64x11-no-starboard target.
+      testonly = true
       deps += [
         "//content/web_test:web_test_browser",
         "//content/web_test:web_test_common",
@@ -246,6 +260,8 @@ source_set("common") {
 
   deps = [
     "//base",
+    "//cc/base",
+    "//cobalt/browser:features",
     "//cobalt/browser:switches",
     "//cobalt/browser/h5vcc_accessibility:manager",
     "//cobalt/browser/h5vcc_runtime:deep_link_manager",
@@ -302,6 +318,7 @@ test("cobalt_unittests") {
     "//cobalt/browser/client_hint_headers/cobalt_header_value_provider_test.cc",
     "//cobalt/browser/client_hint_headers/cobalt_trusted_header_client_test.cc",
     "//cobalt/browser/client_hint_headers/cobalt_trusted_url_loader_header_client_test.cc",
+    "//cobalt/browser/cobalt_content_browser_client_unittest.cc",
     "//cobalt/browser/cobalt_crash_annotations_unittest.cc",
     "//cobalt/browser/cobalt_secure_navigation_throttle_unittest.cc",
     "//cobalt/browser/cobalt_web_contents_observer_unittest.cc",
@@ -319,6 +336,19 @@ test("cobalt_unittests") {
     "//cobalt/shell/browser/h5vcc_scheme_url_loader_factory_unittest.cc",
   ]
 
+  # The symbolizer pipeline test requires launching external Python and
+  # llvm-symbolizer processes, which is not supported on Starboard and
+  # modular/Evergreen platforms due to subprocess spawning restrictions.
+  if (!is_starboard && !sb_is_modular) {
+    sources += [
+      "//cobalt/tools/performance/memory/symbolize_in_process_heap_unittest.cc",
+    ]
+  }
+
+  if (is_starboard || is_androidtv) {
+    sources += [ "//cobalt/browser/hang_watcher_delegate_impl_unittest.cc" ]
+  }
+
   if (is_starboard) {
     sources += [
       "//cobalt/app/app_event_delegate_unittest.cc",
@@ -334,6 +364,13 @@ test("cobalt_unittests") {
       "//cobalt/shell/browser/lifecycle_unittest.cc",
       "//cobalt/shell/browser/shell_test_support.h",
       "//cobalt/shell/browser/splash_screen_unittest.cc",
+    ]
+  }
+
+  if (enable_in_app_dial) {
+    sources += [
+      "//cobalt/browser/dial/dial_http_server_unittest.cc",
+      "//cobalt/browser/dial/dial_udp_server_unittest.cc",
     ]
   }
 
@@ -354,6 +391,7 @@ test("cobalt_unittests") {
     "//cobalt/browser/h5vcc_runtime:deep_link_manager",
     "//cobalt/browser/user_agent",
     "//cobalt/common/libc:libc_test",
+    "//cobalt/memory:unit_tests",
     "//cobalt/shell/browser/migrate_storage_record:unittest",
     "//components/metrics",
     "//components/metrics:test_support",
@@ -406,5 +444,12 @@ test("cobalt_unittests") {
 
   if (use_ozone) {
     deps += [ "//ui/ozone:ozone_switches" ]
+  }
+
+  if (enable_in_app_dial) {
+    deps += [
+      "//cobalt/browser/dial",
+      "//net:test_support",
+    ]
   }
 }

@@ -22,6 +22,7 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/memory/raw_ref.h"
+#include "starboard/android/shared/media_resource_tracker.h"
 #include "starboard/common/check_op.h"
 #include "starboard/common/log.h"
 #include "third_party/jni_zero/jni_zero.h"
@@ -151,12 +152,15 @@ std::unique_ptr<MediaDrmBridge> MediaDrmBridge::Create(
 
 MediaDrmBridge::MediaDrmBridge(PassKey<MediaDrmBridge>,
                                base::raw_ref<MediaDrmBridge::Host> host)
-    : host_(host) {}
+    : host_(host) {
+  MediaResourceTracker::GetInstance()->Increment();
+}
 
 MediaDrmBridge::~MediaDrmBridge() {
   if (!j_media_drm_bridge_.is_null()) {
     Java_MediaDrmBridge_destroy(AttachCurrentThread(), j_media_drm_bridge_);
   }
+  MediaResourceTracker::GetInstance()->Decrement();
 }
 
 void MediaDrmBridge::CreateSession(int ticket,
@@ -235,13 +239,7 @@ const void* MediaDrmBridge::GetMetrics(int* size) {
     return nullptr;
   }
 
-  jbyte* metrics_elements = env->GetByteArrayElements(j_metrics.obj(), nullptr);
-  jsize metrics_size = base::android::SafeGetArrayLength(env, j_metrics);
-  SB_DCHECK(metrics_elements);
-
-  metrics_.assign(metrics_elements, metrics_elements + metrics_size);
-
-  env->ReleaseByteArrayElements(j_metrics.obj(), metrics_elements, JNI_ABORT);
+  base::android::JavaByteArrayToByteVector(env, j_metrics, &metrics_);
   *size = static_cast<int>(metrics_.size());
 
   return metrics_.data();
@@ -273,28 +271,23 @@ void MediaDrmBridge::OnSessionMessage(
 void MediaDrmBridge::OnKeyStatusChange(
     JNIEnv* env,
     const JavaParamRef<jbyteArray>& session_id,
-    const JavaParamRef<jobjectArray>& key_information) {
+    const std::vector<DrmKeyStatusInfo>& key_statuses) {
   std::string session_id_bytes = JavaByteArrayToString(env, session_id);
 
-  // nullptr array indicates key status isn't supported (i.e. Android API < 23)
-  jsize length =
-      (key_information == nullptr) ? 0 : env->GetArrayLength(key_information);
+  size_t length = key_statuses.size();
   std::vector<SbDrmKeyId> drm_key_ids(length);
   std::vector<SbDrmKeyStatus> drm_key_statuses(length);
 
-  for (jsize i = 0; i < length; ++i) {
-    ScopedJavaLocalRef<jobject> j_key_status(
-        env, env->GetObjectArrayElement(key_information.obj(), i));
-    ScopedJavaLocalRef<jbyteArray> j_key_id =
-        Java_KeyStatus_getKeyId(env, j_key_status);
-    std::string key_id = JavaByteArrayToString(env, j_key_id);
+  for (size_t i = 0; i < length; ++i) {
+    const auto& key_status = key_statuses[i];
 
-    SB_DCHECK_LE(key_id.size(), sizeof(drm_key_ids[i].identifier));
-    memcpy(drm_key_ids[i].identifier, key_id.data(), key_id.size());
-    drm_key_ids[i].identifier_size = key_id.size();
-
-    drm_key_statuses[i] =
-        ToSbDrmKeyStatus(Java_KeyStatus_getStatusCode(env, j_key_status));
+    SB_CHECK_LE(key_status.key_id.size(), sizeof(drm_key_ids[i].identifier));
+    if (!key_status.key_id.empty()) {
+      memcpy(drm_key_ids[i].identifier, key_status.key_id.data(),
+             key_status.key_id.size());
+    }
+    drm_key_ids[i].identifier_size = key_status.key_id.size();
+    drm_key_statuses[i] = key_status.status;
   }
 
   host_->OnKeyStatusChange(session_id_bytes, drm_key_ids, drm_key_statuses);
@@ -333,8 +326,8 @@ bool MediaDrmBridge::Initialize(std::string_view key_system,
     return false;
   }
 
-  j_media_drm_bridge_.Reset(env, j_media_drm_bridge.obj());
-  j_media_crypto_.Reset(env, j_media_crypto.obj());
+  j_media_drm_bridge_.Reset(j_media_drm_bridge);
+  j_media_crypto_.Reset(j_media_crypto);
 
   return true;
 }
@@ -363,3 +356,20 @@ std::ostream& operator<<(std::ostream& os, const DrmOperationResult& result) {
 }
 
 }  // namespace starboard
+
+namespace jni_zero {
+template <>
+starboard::DrmKeyStatusInfo FromJniType<starboard::DrmKeyStatusInfo>(
+    JNIEnv* env,
+    const JavaRef<jobject>& j_key_status) {
+  ScopedJavaLocalRef<jbyteArray> j_key_id =
+      starboard::Java_KeyStatus_getKeyId(env, j_key_status);
+  std::vector<uint8_t> key_id_bytes;
+  if (j_key_id) {
+    base::android::JavaByteArrayToByteVector(env, j_key_id, &key_id_bytes);
+  }
+  SbDrmKeyStatus status = starboard::ToSbDrmKeyStatus(
+      starboard::Java_KeyStatus_getStatusCode(env, j_key_status));
+  return starboard::DrmKeyStatusInfo{std::move(key_id_bytes), status};
+}
+}  // namespace jni_zero

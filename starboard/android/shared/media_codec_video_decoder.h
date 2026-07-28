@@ -47,6 +47,7 @@
 #include "starboard/shared/starboard/player/filter/video_renderer_sink.h"
 #include "starboard/shared/starboard/player/input_buffer_internal.h"
 #include "starboard/shared/starboard/player/job_queue.h"
+#include "third_party/jni_zero/jni_zero.h"
 
 namespace starboard {
 
@@ -74,6 +75,7 @@ class MediaCodecVideoDecoder : public VideoDecoder,
   struct PipelineConfig {
     int max_input_size = 0;
     bool enable_flush_during_seek = false;
+    bool use_dual_threads = true;
     ExperimentalFeatures experimental_features;
   };
 
@@ -99,6 +101,8 @@ class MediaCodecVideoDecoder : public VideoDecoder,
                    const TunnelModeConfig& tunnel_mode_config,
                    const PipelineConfig& pipeline_config,
                    const PlatformOptions& platform_options);
+
+  static void SetVideoFramePoolEnabled(bool enabled);
 
   MediaCodecVideoDecoder(
       PassKey<MediaCodecVideoDecoder>,
@@ -144,7 +148,8 @@ class MediaCodecVideoDecoder : public VideoDecoder,
 
   void WriteInputBuffersInternal(const InputBuffers& input_buffers);
   void ProcessOutputBuffer(MediaCodec* media_codec_bridge,
-                           const DequeueOutputResult& output) override;
+                           const DequeueOutputResult& output,
+                           int number_of_pending_inputs) override;
   void OnEndOfStreamWritten(MediaCodec* media_codec_bridge) override;
   void RefreshOutputFormat(MediaCodec* media_codec_bridge) override;
   bool Tick(MediaCodec* media_codec_bridge) override;
@@ -189,10 +194,13 @@ class MediaCodecVideoDecoder : public VideoDecoder,
   // Set the maximum size in bytes of an input buffer for video.
   const int max_video_input_size_;
 
-  const std::optional<bool> use_dual_threads_;
+  // Enable the use of dual-threading for video decoders. This separates the
+  // single threaded decoder thread into separate input and output processing
+  // threads when enabled.
+  const bool use_dual_threads_;
 
   // SurfaceView from AndroidOverlay passed from StarboardRenderer to SbPlayer.
-  void* surface_view_;
+  jni_zero::ScopedJavaGlobalRef<jobject> surface_view_;
 
   const bool enable_flush_during_seek_;
   const int64_t reset_delay_usec_;
@@ -214,7 +222,9 @@ class MediaCodecVideoDecoder : public VideoDecoder,
   // Enable the workaround to ignore stale/dirty MediaCodec callback messages
   // queued on the main thread during a flush.
   const bool ignore_mediacodec_callbacks_during_flushing_;
-  const bool enable_low_latency_;
+  const bool enable_trivial_optimizations_;
+  const bool enable_ndk_video_;
+  const bool fix_need_more_input_backpressure_;
 
   // On some platforms tunnel mode is only supported in the secure pipeline.  So
   // we create a dummy drm system to force the video playing in secure pipeline
