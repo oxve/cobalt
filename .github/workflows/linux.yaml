@@ -25,7 +25,7 @@ jobs:
           for platform in linux-x64x11 linux-modular linux-web-tests chromium_linux; do
             failed="false"
             failures="{}"
-            if [ "$platform" = "linux-modular" ]; then
+            if [ "$platform" = "linux-modular" ] && [ "${GITHUB_RUN_ATTEMPT}" = "1" ]; then
               failed="true"
               failures='{"failing_tests": {"cobalt/dom/dom_test.xml": [{"name": "DOMTest.CreateElement", "message": "Expected equality of 1 and 2"}]}}'
             fi
@@ -48,25 +48,39 @@ jobs:
           done
 
       - name: Upload Mock linux-x64x11
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: validation-report-linux-x64x11
           path: report_linux-x64x11.json
 
       - name: Upload Mock linux-modular
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: validation-report-linux-modular
           path: report_linux-modular.json
 
       - name: Upload Mock linux-web-tests
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: validation-report-linux-web-tests
           path: report_linux-web-tests.json
 
       - name: Upload Mock chromium_linux
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: validation-report-chromium_linux
           path: report_chromium_linux.json
+
+      - name: Fail if mock failed
+        if: always()
+        run: |
+          for platform in linux-x64x11 linux-modular linux-web-tests chromium_linux; do
+            if [ -f "report_${platform}.json" ] && jq -e '.failed == true' "report_${platform}.json" > /dev/null; then
+              echo "Platform ${platform} failed."
+              exit 1
+            fi
+          done
