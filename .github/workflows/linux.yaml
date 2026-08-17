@@ -5,9 +5,11 @@ on:
     types: [opened, reopened, synchronize, ready_for_review]
     branches:
       - main
+      - test/collate-feature
   push:
     branches:
       - main
+      - test/collate-feature
   workflow_dispatch:
 
 permissions:
