@@ -39,6 +39,7 @@ def main() -> None:
       '|---|---|---|---|---|---|',
   ]
 
+  all_failures = {}
   for entry in report_data:
     if entry['status'] == 'in_progress':
       markdown_lines.append(
@@ -61,6 +62,30 @@ def main() -> None:
           f" {d.get('on_host_test_result')} |"
           f" {d.get('on_device_test_result')} | {test_summary} |"
           f' {status_icon} |')
+
+      if failures:
+        for suite, tests in failures.items():
+          if suite not in all_failures:
+            all_failures[suite] = []
+          all_failures[suite].extend(tests)
+
+  if all_failures:
+    markdown_lines.extend([
+        '',
+        '### Failing Tests Details',
+    ])
+    for suite, tests in all_failures.items():
+      markdown_lines.extend([
+          '',
+          f'#### {suite}',
+      ])
+      for test in tests:
+        test_name = test['name']
+        markdown_lines.append(f'- **{test_name}**')
+        if test.get('message'):
+          indented = '\n'.join(
+              f'  {line}' for line in test['message'].split('\n'))
+          markdown_lines.extend(['  ```', f'{indented}', '  ```'])
 
   with open('combined_report.md', 'w', encoding='utf-8') as f:
     f.write('\n'.join(markdown_lines))
