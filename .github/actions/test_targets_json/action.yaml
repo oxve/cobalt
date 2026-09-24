@@ -9,6 +9,10 @@ inputs:
     description: "Where the tests run (e.g., host, device). Omit for no filter."
     required: false
     default: ""
+  target_filter:
+    description: "Optional filter string (e.g. 'playback', 'finch', 'standard_yts') to differentiate targets of same test_type."
+    required: false
+    default: ""
   test_targets_json_file:
     description: "Path to the test targets JSON file. If provided, skip downloading."
     required: false
@@ -27,16 +31,24 @@ runs:
       env:
         TEST_TYPE: ${{ inputs.test_type }}
         RUNS_ON: ${{ inputs.runs_on }}
+        TARGET_FILTER: ${{ inputs.target_filter }}
         JSON_FILE: ${{ inputs.test_targets_json_file }}
       run: |
         filtered_json="$(jq -cr \
           --arg test_type "${TEST_TYPE}" \
           --arg runs_on "${RUNS_ON}" \
+          --arg target_filter "${TARGET_FILTER}" \
           '[
             .[]
             | select(
                 ($test_type == "" or .test_type == $test_type) and
-                ($runs_on == "" or .runs_on == $runs_on)
+                ($runs_on == "" or .runs_on == $runs_on) and
+                (
+                  $target_filter == "" or
+                  ($target_filter == "playback" and (.target | contains("PLAYBACK"))) or
+                  ($target_filter == "finch" and (.target | contains("finch"))) or
+                  ($target_filter == "standard_yts" and (.target | contains("PLAYBACK") | not) and (.target | contains("finch") | not))
+                )
               )
           ]' "${JSON_FILE}")"
 
