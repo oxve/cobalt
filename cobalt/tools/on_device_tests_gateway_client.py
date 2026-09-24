@@ -254,7 +254,8 @@ def _process_test_requests(args: argparse.Namespace) -> List[Dict[str, Any]]:
       if 'cobalt_browsertests' in target_name:
         test_type = 'browser_test'
 
-    elif test_type in ('e2e_test', 'yts_test', 'yts_wpt_test'):
+    elif test_type in ('e2e_test', 'yts_test', 'yts_playback_test',
+                       'yts_finch_test', 'yts_wpt_test'):
       if isinstance(target_data, dict):
         test_target = target_data.get('target', '')
       else:
@@ -278,7 +279,7 @@ def _process_test_requests(args: argparse.Namespace) -> List[Dict[str, Any]]:
           params.append(f'gcs_cobalt_archive=gs://{args.cobalt_path}.zip')
         else:
           bigstore_path = f'/bigstore/{args.cobalt_path}/{args.artifact_name}'
-          if test_type == 'yts_test':
+          if test_type in ('yts_test', 'yts_playback_test', 'yts_finch_test'):
             files.append(f'build_apk={bigstore_path}')
             params.append('app=dev.cobalt.coat')
           else:
@@ -345,7 +346,8 @@ def main() -> int:
       type=str,
       required=True,
       choices=[
-          'unit_test', 'e2e_test', 'yts_test', 'browser_test', 'yts_wpt_test'
+          'unit_test', 'e2e_test', 'yts_test', 'yts_playback_test',
+          'yts_finch_test', 'browser_test', 'yts_wpt_test'
       ],
       help='Type of test to run.',
   )
@@ -455,7 +457,8 @@ def main() -> int:
     if args.action == 'trigger':
       # TODO(b/428961033): Let argparse handle these checks as required
       # arguments.
-      if args.test_type in ('e2e_test', 'yts_test', 'yts_wpt_test'):
+      if args.test_type in ('e2e_test', 'yts_test', 'yts_playback_test',
+                            'yts_finch_test', 'yts_wpt_test'):
         if not args.cobalt_path:
           raise ValueError(f'--cobalt_path is required for {args.test_type}')
       elif args.test_type in ('unit_test', 'browser_test'):

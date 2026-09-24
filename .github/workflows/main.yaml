@@ -373,16 +373,10 @@ jobs:
                       )
                     ) or
                     (.test_type == "e2e_test" and $run_e2e_test == "true") or
-                    (.test_type == "yts_test" and (
-                      (.target | contains("PLAYBACK")) as $is_playback |
-                      (.target | contains("finch")) as $is_finch |
-                      (
-                        ($is_playback and $run_yts_playback_test == "true") or
-                        ($is_finch and $run_yts_finch_test == "true") or
-                        ((not $is_playback and not $is_finch) and $run_yts_test == "true")
-                      )
-                    )) or
-                    (.test_type == "yts_wpt_test" and $run_yts_wpt_test == "true")
+                    (.test_type == "yts_test" and $run_yts_test == "true") or
+                    (.test_type == "yts_playback_test" and $run_yts_playback_test == "true") or
+                    (.test_type == "yts_wpt_test" and $run_yts_wpt_test == "true") or
+                    (.test_type == "yts_finch_test" and $run_yts_finch_test == "true")
                   )
                 )
               ]' "${test_targets_json_file}")
@@ -693,6 +687,7 @@ jobs:
           nightly: ${{ inputs.nightly }}
           test_type: 'e2e_test'
           test_targets_json: ${{ steps.parse-e2e-targets.outputs.test_targets_json }}
+          cobalt_path: ${{ matrix.name }}-test-artifacts/${{ github.workflow }}/${{ github.run_number }}/${{ matrix.platform }}
           artifact_name: 'Cobalt.apk'
           test_results_key: ${{ env.TEST_RESULTS_KEY }}
           gcs_results_path: gs://cobalt-unittest-storage/results/${{ matrix.name }}/${{ github.run_id }}/${{ github.run_attempt }}
@@ -736,7 +731,6 @@ jobs:
         with:
           test_type: yts_test
           runs_on: device
-          target_filter: standard_yts
       - name: Run YTS Tests
         if: ${{ fromJson(steps.parse-yts-targets.outputs.test_targets_count) > 0 }}
         uses: ./.github/actions/on_device_tests
@@ -744,6 +738,7 @@ jobs:
           nightly: ${{ inputs.nightly }}
           test_type: 'yts_test'
           test_targets_json: ${{ steps.parse-yts-targets.outputs.test_targets_json }}
+          cobalt_path: ${{ matrix.name }}-test-artifacts/${{ github.workflow }}/${{ github.run_number }}/${{ matrix.platform }}
           artifact_name: 'Cobalt.apk'
           test_results_key: ${{ env.TEST_RESULTS_KEY }}
           gcs_results_path: gs://cobalt-unittest-storage/results/${{ matrix.name }}/${{ github.run_id }}/${{ github.run_attempt }}
@@ -779,16 +774,16 @@ jobs:
         id: parse-yts-playback-targets
         uses: ./.github/actions/test_targets_json
         with:
-          test_type: yts_test
+          test_type: yts_playback_test
           runs_on: device
-          target_filter: playback
       - name: Run YTS Playback Tests
         if: ${{ fromJson(steps.parse-yts-playback-targets.outputs.test_targets_count) > 0 }}
         uses: ./.github/actions/on_device_tests
         with:
           nightly: ${{ inputs.nightly }}
-          test_type: 'yts_test'
+          test_type: 'yts_playback_test'
           test_targets_json: ${{ steps.parse-yts-playback-targets.outputs.test_targets_json }}
+          cobalt_path: ${{ matrix.name }}-test-artifacts/${{ github.workflow }}/${{ github.run_number }}/${{ matrix.platform }}
           artifact_name: 'Cobalt.apk'
           test_results_key: ${{ env.TEST_RESULTS_KEY }}
           gcs_results_path: gs://cobalt-unittest-storage/results/${{ matrix.name }}/${{ github.run_id }}/${{ github.run_attempt }}
@@ -869,6 +864,7 @@ jobs:
           nightly: ${{ inputs.nightly }}
           test_type: 'yts_wpt_test'
           test_targets_json: ${{ steps.parse-yts-wpt-targets.outputs.test_targets_json }}
+          cobalt_path: ${{ matrix.name }}-test-artifacts/${{ github.workflow }}/${{ github.run_number }}/${{ matrix.platform }}
           artifact_name: 'Cobalt.apk'
           test_results_key: ${{ env.TEST_RESULTS_KEY }}
           gcs_results_path: gs://cobalt-unittest-storage/results/${{ matrix.name }}/${{ github.run_id }}/${{ github.run_attempt }}
@@ -909,16 +905,16 @@ jobs:
         id: parse-yts-finch-targets
         uses: ./.github/actions/test_targets_json
         with:
-          test_type: yts_test
+          test_type: yts_finch_test
           runs_on: device
-          target_filter: finch
       - name: Run YTS Finch Tests
         if: ${{ fromJson(steps.parse-yts-finch-targets.outputs.test_targets_count) > 0 }}
         uses: ./.github/actions/on_device_tests
         with:
           nightly: ${{ inputs.nightly }}
-          test_type: 'yts_test'
+          test_type: 'yts_finch_test'
           test_targets_json: ${{ steps.parse-yts-finch-targets.outputs.test_targets_json }}
+          cobalt_path: ${{ matrix.name }}-test-artifacts/${{ github.workflow }}/${{ github.run_number }}/${{ matrix.platform }}
           artifact_name: 'Cobalt.apk'
           test_results_key: ${{ env.TEST_RESULTS_KEY }}
           gcs_results_path: gs://cobalt-unittest-storage/results/${{ matrix.name }}/${{ github.run_id }}/${{ github.run_attempt }}

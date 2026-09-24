@@ -87,7 +87,7 @@ runs:
         GITHUB_WORKFLOW: ${{ github.workflow }}
         TEST_TYPE: ${{ inputs.test_type }}
         ARTIFACT_NAME: ${{ inputs.artifact_name }}
-        COBALT_PATH: ${{ inputs.cobalt_path || format('{0}-test-artifacts/{1}/{2}/{3}', env.PROJECT_NAME, github.workflow, github.run_number, matrix.platform) }}
+        COBALT_PATH: ${{ inputs.cobalt_path }}
         PLATFORM: ${{ matrix.platform }}
         TEST_DEVICE_FAMILY: ${{ inputs.test_device_family }}
         TEST_DIMENSIONS: ${{ inputs.test_dimensions }}
@@ -168,7 +168,7 @@ runs:
           fi
 
           xml_files=("${test_output}/${PLATFORM}"/**/"${test_target}"*.xml)
-          if [[ "${#xml_files[@]}" -eq 0 ]]; then
+          if [[ "${#xml_files[@]}" -eq 0 && ("${TEST_TYPE}" == "e2e_test" || "${TEST_TYPE}" == "yts_test" || "${TEST_TYPE}" == "yts_playback_test" || "${TEST_TYPE}" == "yts_finch_test" || "${TEST_TYPE}" == "yts_wpt_test") ]]; then
             # Check if a JSON report exists that can be converted to JUnit XML.
             json_reports=("${test_output}/${PLATFORM}"/**/"${test_target}"*report.json)
             if [ -f "${json_reports[0]:-}" ]; then
@@ -187,11 +187,9 @@ runs:
             log_paths=("${test_output}/${PLATFORM}"/**/"${test_target}"_log.txt)
             target_out_xml="${test_output}/${PLATFORM}/1/${test_target}_testoutput.xml"
             mkdir -p "$(dirname "${target_out_xml}")"
-            if [[ "${TEST_TYPE}" == "unit_test" || "${TEST_TYPE}" == "browser_test" ]]; then
-              if [ -f "${log_paths[0]:-}" ]; then
-                python3 "${GITHUB_WORKSPACE}/.github/scripts/generate_crash_report.py" "${log_paths[0]}" "${target_out_xml}"
-              fi
-            else
+            if [[ -f "${log_paths[0]:-}" && ("${TEST_TYPE}" == "unit_test" || "${TEST_TYPE}" == "browser_test") ]]; then
+              python3 "${GITHUB_WORKSPACE}/.github/scripts/generate_crash_report.py" "${log_paths[0]}" "${target_out_xml}"
+            elif [[ "${TEST_TYPE}" != "unit_test" && "${TEST_TYPE}" != "browser_test" ]]; then
               cmd=("python3" "${GITHUB_WORKSPACE}/.github/scripts/synthesize_internal_test_failure.py" \
                 "--target" "${test_target}" \
                 "--xml-path" "${target_out_xml}")
