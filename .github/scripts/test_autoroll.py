@@ -62,6 +62,14 @@ Critical User Journeys (CUJs) Covered:
   Because the roll cursor remains stickied to the last full mode SHA, any older
   PRs labeled later are discovered and migrated even if newer PRs have already
   been merged. The AUTOROLL file SHA remains stickied to the last full mode SHA.
+
+Integration Test Guidelines:
+- All integration tests MUST verify the branch state after the SUT finishes:
+  1. Verify working tree and index cleanliness via `assert_working_tree_clean`.
+  2. Verify applied commits on the branch match expected counts and titles via
+     `get_branch_commit_titles`, or verify HEAD remains unchanged on aborts.
+  3. Verify working tree files and conflict markers match expected state.
+  4. Verify `.github/AUTOROLL` cursor file content matches expected state.
 """
 
 import io
@@ -271,6 +279,18 @@ class TestAutorollIntegration(unittest.TestCase):
       stderr_val = temp_err.read()
     return exit_code, captured_stdout.getvalue(), stderr_val
 
+  def assert_working_tree_clean(self):
+    """Asserts that git status shows a clean working tree and index."""
+    status = self.git('status', '--porcelain').stdout.strip()
+    self.assertEqual(status, '')
+
+  def get_branch_commit_titles(self, base_ref):
+    """Returns commit titles between base_ref and HEAD in chronological order.
+    """
+    output = self.git('log', '--reverse', f'{base_ref}..HEAD',
+                      '--format=%s').stdout.strip()
+    return output.splitlines() if output else []
+
   def test_cuj1_clean_roll_full_mode(self):
     """CUJ 1: Clean Roll (Full Mode) rolls all commits and updates cursor."""
     self.init_target_branch('staging')
@@ -300,7 +320,13 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertTrue(os.path.exists('a.txt'))
     self.assertTrue(os.path.exists('b.txt'))
 
-    # .github/AUTOROLL on HEAD must be updated to the last rolled commit
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('staging')
+    self.assertEqual(len(commit_titles), 2)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #101:'))
+    self.assertEqual(commit_titles[1],
+                     f'Cherry pick commit {sha2}: Direct commit without PR')
     autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
     self.assertEqual(autoroll_content, sha2)
 
@@ -344,7 +370,12 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertFalse(os.path.exists('b.txt'))
     self.assertTrue(os.path.exists('c.txt'))
 
-    # Cursor must remain pinned to start_sha in label mode on success
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('27.lts')
+    self.assertEqual(len(commit_titles), 2)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #101:'))
+    self.assertTrue(commit_titles[1].startswith('Cherry pick PR #103:'))
     autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
     self.assertEqual(autoroll_content, self.start_sha)
 
@@ -404,6 +435,14 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertEqual(stdout.strip(), '- #103')
     self.assertTrue(os.path.exists('c.txt'))
 
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('27.lts')
+    self.assertEqual(len(commit_titles), 1)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #103:'))
+    autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
+    self.assertEqual(autoroll_content, self.start_sha)
+
   def test_cuj4_incremental_stacking_on_open_pr(self):
     """CUJ 4: Incremental stacking preserves commits in target..HEAD."""
     self.init_target_branch('27.lts')
@@ -447,6 +486,15 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertEqual(exit_code, 0)
     self.assertEqual(stdout.strip(), '- #101\n- #102')
     self.assertTrue(os.path.exists('b.txt'))
+
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('27.lts')
+    self.assertEqual(len(commit_titles), 2)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #101:'))
+    self.assertTrue(commit_titles[1].startswith('Cherry pick PR #102:'))
+    autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
+    self.assertEqual(autoroll_content, self.start_sha)
 
   def test_cuj5_conflict_on_first_commit_full_mode(self):
     """CUJ 5: Conflict on first commit in full mode stages conflict."""
@@ -493,9 +541,14 @@ class TestAutorollIntegration(unittest.TestCase):
                        '```')
     self.assertEqual(stdout.strip(), expected_output)
 
-    last_title = self.git('log', '-1', '--format=%s').stdout.strip()
-    self.assertTrue(last_title.startswith('CONFLICTED Cherry pick PR #101:'))
-
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('staging')
+    self.assertEqual(len(commit_titles), 1)
+    self.assertTrue(
+        commit_titles[0].startswith('CONFLICTED Cherry pick PR #101:'))
+    conflict_content = self.git('show', 'HEAD:conflict.txt').stdout
+    self.assertIn('<<<<<<< HEAD', conflict_content)
     autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
     self.assertEqual(autoroll_content, f'CONFLICTED:{sha1}')
 
@@ -550,8 +603,14 @@ class TestAutorollIntegration(unittest.TestCase):
                        '```')
     self.assertEqual(stdout.strip(), expected_output)
 
-    last_title = self.git('log', '-1', '--format=%s').stdout.strip()
-    self.assertTrue(last_title.startswith('CONFLICTED Cherry pick PR #101:'))
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('27.lts')
+    self.assertEqual(len(commit_titles), 1)
+    self.assertTrue(
+        commit_titles[0].startswith('CONFLICTED Cherry pick PR #101:'))
+    conflict_content = self.git('show', 'HEAD:conflict.txt').stdout
+    self.assertIn('<<<<<<< HEAD', conflict_content)
 
     # In label mode, AUTOROLL marker file SHA must not be updated to candidate
     # SHA; it must remain stickied to the last full mode SHA (base_sha).
@@ -604,9 +663,15 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertEqual(stdout.strip(), '- #101')
     self.assertTrue(os.path.exists('clean.txt'))
 
-    # Working tree and index must be clean
-    status = self.git('status', '--porcelain').stdout.strip()
-    self.assertEqual(status, '')
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('27.lts')
+    self.assertEqual(len(commit_titles), 1)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #101:'))
+    with open('conflict.txt', 'r', encoding='utf-8') as f:
+      self.assertEqual(f.read(), 'line 1\n27.lts edit\n')
+    autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
+    self.assertEqual(autoroll_content, base_sha)
 
   def test_cuj8_auto_resolvable_deleted_by_them_conflict(self):
     """CUJ 8: Auto-resolves deleted file conflict without failure."""
@@ -653,10 +718,17 @@ class TestAutorollIntegration(unittest.TestCase):
 
     self.assertEqual(exit_code, 0)
     self.assertEqual(stdout.strip(), '- #101')
-    last_title = self.git('log', '-1', '--format=%s').stdout.strip()
-    self.assertFalse(last_title.startswith('CONFLICTED'))
     self.assertTrue(os.path.exists('added_file.txt'))
     self.assertFalse(os.path.exists('to_delete.txt'))
+
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('27.lts')
+    self.assertEqual(len(commit_titles), 1)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #101:'))
+    self.assertFalse(commit_titles[0].startswith('CONFLICTED'))
+    autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
+    self.assertEqual(autoroll_content, base_sha)
 
   def test_cuj9_halts_on_unresolved_conflicted_pr_branch(self):
     """CUJ 9: Exits with code 1 if HEAD has an unresolved CONFLICTED commit."""
@@ -670,6 +742,8 @@ class TestAutorollIntegration(unittest.TestCase):
     self.git('commit', '-m', 'Conflicted commit')
 
     prs_json = self.create_prs_json({101: ['cp-27.lts']})
+
+    head_before = self.get_head_sha()
 
     exit_code, _, stderr = self.run_autoroll([
         '--source-branch',
@@ -691,6 +765,10 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertEqual(exit_code, 1)
     self.assertIn('Autoroll branch has an unresolved CONFLICTED commit.',
                   stderr)
+
+    # Verify branch state after SUT finishes (aborted with zero state changes)
+    self.assertEqual(self.get_head_sha(), head_before)
+    self.assert_working_tree_clean()
 
   def test_cuj10_halts_on_resolved_conflicted_pr_branch(self):
     """CUJ 10: Halts if existing PR was resolved until squashed & merged."""
@@ -715,6 +793,8 @@ class TestAutorollIntegration(unittest.TestCase):
 
     prs_json = self.create_prs_json({101: ['cp-27.lts']})
 
+    head_before = self.get_head_sha()
+
     exit_code, _, stderr = self.run_autoroll([
         '--source-branch',
         'main',
@@ -737,12 +817,19 @@ class TestAutorollIntegration(unittest.TestCase):
         'Autoroll branch has a resolved CONFLICTED commit. '
         'Squash and merge before autoroll will continue.', stderr)
 
+    # Verify branch state after SUT finishes (halted with zero state changes)
+    self.assertEqual(self.get_head_sha(), head_before)
+    self.assert_working_tree_clean()
+
   def test_cuj11_respects_max_commits(self):
     """CUJ 11: Autoroller stops rolling once max commits limit is reached."""
     self.init_target_branch('staging')
 
+    shas = []
     for i in range(1, 6):
-      self.commit_file(f'f{i}.txt', f'content {i}\n', f'Feature {i} (#{100+i})')
+      shas.append(
+          self.commit_file(f'f{i}.txt', f'content {i}\n',
+                           f'Feature {i} (#{100+i})'))
 
     self.git('checkout', 'staging')
     self.git('checkout', '-b', 'autoroll-main-to-staging')
@@ -766,11 +853,27 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertEqual(stdout.strip(), '- #101\n- #102')
     self.assertIn('Reached commit limit (2).', stderr)
 
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('staging')
+    self.assertEqual(len(commit_titles), 2)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #101:'))
+    self.assertTrue(commit_titles[1].startswith('Cherry pick PR #102:'))
+    self.assertTrue(os.path.exists('f1.txt'))
+    self.assertTrue(os.path.exists('f2.txt'))
+    self.assertFalse(os.path.exists('f3.txt'))
+    self.assertFalse(os.path.exists('f4.txt'))
+    self.assertFalse(os.path.exists('f5.txt'))
+    autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
+    self.assertEqual(autoroll_content, shas[1])
+
   def test_cuj12_label_mode_requires_prs_json(self):
     """CUJ 12: Exits with code 1 if label mode is invoked without --prs-json."""
     self.init_target_branch('27.lts')
     self.git('checkout', '27.lts')
     self.git('checkout', '-b', 'autoroll-main-to-27.lts')
+
+    head_before = self.get_head_sha()
 
     exit_code, _, stderr = self.run_autoroll([
         '--source-branch',
@@ -789,6 +892,10 @@ class TestAutorollIntegration(unittest.TestCase):
 
     self.assertEqual(exit_code, 1)
     self.assertIn('Error: --prs-json is required in label mode.', stderr)
+
+    # Verify branch state after SUT finishes (exited with zero state changes)
+    self.assertEqual(self.get_head_sha(), head_before)
+    self.assert_working_tree_clean()
 
   def test_cuj13_out_of_order_prs_in_label_mode(self):
     """CUJ 13: Picks unrolled older PR when newer PR is already merged."""
@@ -834,7 +941,12 @@ class TestAutorollIntegration(unittest.TestCase):
     self.assertEqual(exit_code, 0)
     self.assertEqual(stdout.strip(), '- #101')
     self.assertTrue(os.path.exists('a.txt'))
-    # Ensure AUTOROLL marker file SHA remains stickied to last full mode SHA
+
+    # Verify branch state after SUT finishes
+    self.assert_working_tree_clean()
+    commit_titles = self.get_branch_commit_titles('27.lts')
+    self.assertEqual(len(commit_titles), 1)
+    self.assertTrue(commit_titles[0].startswith('Cherry pick PR #101:'))
     autoroll_content = self.git('show', 'HEAD:.github/AUTOROLL').stdout.strip()
     self.assertEqual(autoroll_content, self.start_sha)
 
