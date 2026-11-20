@@ -1031,9 +1031,9 @@ jobs:
         with:
           log_glob: |
             results/**/${{ steps.extract-target-name.outputs.test_target }}*log.txt
-            results/**/${{ steps.extract-target-name.outputs.test_target }}*symbolized_crash.txt
             results/**/${{ steps.extract-target-name.outputs.test_target }}*cobalt.log
             results/**/${{ steps.extract-target-name.outputs.test_target }}*yts.log
+            results/**/${{ steps.extract-target-name.outputs.test_target }}*symbolized_crash.txt
             results/**/${{ steps.extract-target-name.outputs.test_target }}*logcat.txt
           results_glob: results/**/${{ steps.extract-target-name.outputs.test_target }}*.xml
           symbolize: 'false'
